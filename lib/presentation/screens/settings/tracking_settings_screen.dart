@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:owntrack/core/constants/app_constants.dart';
+import 'package:owntrack/data/services/permission_service.dart';
 import 'package:owntrack/domain/providers/app_providers.dart';
 
 /// Tracking settings screen for location and monitoring configuration
@@ -15,11 +16,16 @@ class TrackingSettingsScreen extends ConsumerStatefulWidget {
 class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen> {
   int _monitoringMode = AppConstants.monitoringModeSignificant;
   bool _isTracking = false;
+  AppPermissionStatus _locationPermission = AppPermissionStatus.denied;
+  AppPermissionStatus _notificationPermission = AppPermissionStatus.denied;
+  bool _backgroundLocationGranted = false;
+  bool _isCheckingPermissions = true;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _checkPermissions();
   }
 
   void _loadSettings() {
@@ -28,6 +34,25 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
       _monitoringMode = settingsRepo.getMonitoringMode();
       _isTracking = ref.read(trackingEnabledProvider);
     });
+  }
+
+  Future<void> _checkPermissions() async {
+    final permissionService = ref.read(permissionServiceProvider);
+
+    final locationStatus = await permissionService.checkLocationPermission();
+    final notificationStatus =
+        await permissionService.checkNotificationPermission();
+    final backgroundLocationStatus =
+        await permissionService.checkBackgroundLocationPermission();
+
+    if (mounted) {
+      setState(() {
+        _locationPermission = locationStatus;
+        _notificationPermission = notificationStatus;
+        _backgroundLocationGranted = backgroundLocationStatus;
+        _isCheckingPermissions = false;
+      });
+    }
   }
 
   @override
@@ -126,33 +151,46 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
 
           // Permissions
           Card(
-            child: Column(
-              children: [
-                const ListTile(
-                  leading: Icon(Icons.location_on),
-                  title: Text('Location Permission'),
-                  subtitle: Text('Required for location tracking'),
-                  trailing: Icon(Icons.check_circle, color: Colors.green),
-                ),
-                const ListTile(
-                  leading: Icon(Icons.notifications),
-                  title: Text('Notification Permission'),
-                  subtitle: Text('For background tracking alerts'),
-                  trailing: Icon(Icons.check_circle, color: Colors.green),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.battery_charging_full),
-                  title: const Text('Battery Optimization'),
-                  subtitle: const Text('Disabled for reliable tracking'),
-                  trailing: TextButton(
-                    onPressed: () {
-                      // TODO: Open battery settings
-                    },
-                    child: const Text('Configure'),
+            child: _isCheckingPermissions
+                ? const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : Column(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.location_on),
+                        title: const Text('Location Permission'),
+                        subtitle: Text(_getPermissionSubtitle(_locationPermission)),
+                        trailing: _buildPermissionTrailing(_locationPermission),
+                        onTap: () => _requestLocationPermission(),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.gps_fixed),
+                        title: const Text('Background Location'),
+                        subtitle: Text(_backgroundLocationGranted
+                            ? 'Granted - can track in background'
+                            : 'Not granted - foreground only'),
+                        trailing: Icon(
+                          _backgroundLocationGranted
+                              ? Icons.check_circle
+                              : Icons.error_outline,
+                          color: _backgroundLocationGranted
+                              ? Colors.green
+                              : Colors.orange,
+                        ),
+                        onTap: () => _requestBackgroundLocationPermission(),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.notifications),
+                        title: const Text('Notification Permission'),
+                        subtitle: Text(_getPermissionSubtitle(_notificationPermission)),
+                        trailing:
+                            _buildPermissionTrailing(_notificationPermission),
+                        onTap: () => _requestNotificationPermission(),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -206,20 +244,75 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
   }
 
   void _toggleTracking(bool enabled) async {
-    // Update state provider
-    ref.read(trackingEnabledProvider.notifier).state = enabled;
+    // First check if we have required permissions
+    if (enabled && _locationPermission != AppPermissionStatus.granted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please grant location permission first'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        // Reset the toggle
+        setState(() {
+          _isTracking = false;
+        });
+      }
+      return;
+    }
 
-    if (mounted) {
-      if (enabled) {
+    final trackingService = ref.read(trackingServiceProvider);
+
+    if (enabled) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Starting location tracking...')),
         );
-        // TODO: Start tracking service
-      } else {
+      }
+
+      final started = await trackingService.startTracking();
+
+      if (mounted) {
+        if (started) {
+          // Update state provider
+          ref.read(trackingEnabledProvider.notifier).state = true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location tracking started'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          // Failed to start
+          setState(() {
+            _isTracking = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to start tracking. Check permissions and location services.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } else {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Stopping location tracking...')),
         );
-        // TODO: Stop tracking service
+      }
+
+      await trackingService.stopTracking();
+
+      if (mounted) {
+        // Update state provider
+        ref.read(trackingEnabledProvider.notifier).state = false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location tracking stopped'),
+            backgroundColor: Colors.grey,
+          ),
+        );
       }
     }
   }
@@ -233,5 +326,131 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
         SnackBar(content: Text('Monitoring mode set to ${_getModeName(mode)}')),
       );
     }
+  }
+
+  String _getPermissionSubtitle(AppPermissionStatus status) {
+    switch (status) {
+      case AppPermissionStatus.granted:
+        return 'Granted';
+      case AppPermissionStatus.denied:
+        return 'Tap to request permission';
+      case AppPermissionStatus.permanentlyDenied:
+        return 'Denied - tap to open settings';
+      case AppPermissionStatus.restricted:
+        return 'Restricted by device policy';
+    }
+  }
+
+  Widget _buildPermissionTrailing(AppPermissionStatus status) {
+    switch (status) {
+      case AppPermissionStatus.granted:
+        return const Icon(Icons.check_circle, color: Colors.green);
+      case AppPermissionStatus.denied:
+        return const Icon(Icons.error_outline, color: Colors.orange);
+      case AppPermissionStatus.permanentlyDenied:
+        return const Icon(Icons.settings, color: Colors.red);
+      case AppPermissionStatus.restricted:
+        return const Icon(Icons.block, color: Colors.grey);
+    }
+  }
+
+  Future<void> _requestLocationPermission() async {
+    if (_locationPermission == AppPermissionStatus.permanentlyDenied) {
+      _showOpenSettingsDialog('Location');
+      return;
+    }
+
+    final permissionService = ref.read(permissionServiceProvider);
+    final status = await permissionService.requestLocationPermission();
+
+    if (mounted) {
+      setState(() {
+        _locationPermission = status;
+      });
+
+      if (status == AppPermissionStatus.granted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permission granted')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permission denied')),
+        );
+      }
+    }
+  }
+
+  Future<void> _requestBackgroundLocationPermission() async {
+    final permissionService = ref.read(permissionServiceProvider);
+    final status = await permissionService.requestBackgroundLocationPermission();
+
+    if (mounted) {
+      setState(() {
+        _backgroundLocationGranted = status == AppPermissionStatus.granted;
+      });
+
+      if (status == AppPermissionStatus.granted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Background location permission granted')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Background location permission denied')),
+        );
+      }
+    }
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    if (_notificationPermission == AppPermissionStatus.permanentlyDenied) {
+      _showOpenSettingsDialog('Notification');
+      return;
+    }
+
+    final permissionService = ref.read(permissionServiceProvider);
+    final status = await permissionService.requestNotificationPermission();
+
+    if (mounted) {
+      setState(() {
+        _notificationPermission = status;
+      });
+
+      if (status == AppPermissionStatus.granted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notification permission granted')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notification permission denied')),
+        );
+      }
+    }
+  }
+
+  void _showOpenSettingsDialog(String permissionName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('$permissionName Permission Required'),
+        content: Text(
+          '$permissionName permission has been permanently denied. Please enable it in app settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              final permissionService = ref.read(permissionServiceProvider);
+              await permissionService.openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 }

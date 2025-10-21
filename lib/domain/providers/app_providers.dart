@@ -10,6 +10,15 @@ import 'package:owntrack/data/repositories/message_queue_repository.dart';
 import 'package:owntrack/data/repositories/regions_repository.dart';
 import 'package:owntrack/data/repositories/settings_repository.dart';
 import 'package:owntrack/data/repositories/waypoints_repository.dart';
+import 'package:owntrack/data/services/battery_service.dart';
+import 'package:owntrack/data/services/encryption_service.dart';
+import 'package:owntrack/data/services/geofencing_service.dart';
+import 'package:owntrack/data/services/http_service.dart';
+import 'package:owntrack/data/services/location_service.dart';
+import 'package:owntrack/data/services/message_processor.dart';
+import 'package:owntrack/data/services/mqtt_service.dart';
+import 'package:owntrack/data/services/permission_service.dart';
+import 'package:owntrack/data/services/tracking_service.dart';
 
 // ============================================================================
 // Local Data Sources
@@ -65,6 +74,84 @@ final endpointStateRepositoryProvider =
 final messageQueueRepositoryProvider = Provider<MessageQueueRepository>((ref) {
   final localDataSource = ref.watch(settingsLocalDataSourceProvider);
   return MessageQueueRepository(localDataSource);
+});
+
+// ============================================================================
+// Service Providers
+// ============================================================================
+
+/// Provides the permission service for managing app permissions
+final permissionServiceProvider = Provider<PermissionService>((ref) {
+  return PermissionService();
+});
+
+/// Provides the battery service for battery monitoring
+final batteryServiceProvider = Provider<BatteryService>((ref) {
+  return BatteryService();
+});
+
+/// Provides the location service for GPS tracking
+final locationServiceProvider = Provider<LocationService>((ref) {
+  final settingsRepo = ref.watch(settingsRepositoryProvider);
+  return LocationService(settingsRepo);
+});
+
+/// Provides the geofencing service for region monitoring
+final geofencingServiceProvider = Provider<GeofencingService>((ref) {
+  final regionsRepo = ref.watch(regionsRepositoryProvider);
+  return GeofencingService(regionsRepo);
+});
+
+/// Provides the encryption service for message encryption
+final encryptionServiceProvider = Provider<EncryptionService>((ref) {
+  final settingsRepo = ref.watch(settingsRepositoryProvider);
+  return EncryptionService(settingsRepo);
+});
+
+/// Provides the MQTT service for MQTT protocol communication
+final mqttServiceProvider = Provider<MqttService>((ref) {
+  final settingsRepo = ref.watch(settingsRepositoryProvider);
+  final stateRepo = ref.watch(endpointStateRepositoryProvider);
+  return MqttService(settingsRepo, stateRepo);
+});
+
+/// Provides the HTTP service for HTTP protocol communication
+final httpServiceProvider = Provider<HttpService>((ref) {
+  final settingsRepo = ref.watch(settingsRepositoryProvider);
+  final stateRepo = ref.watch(endpointStateRepositoryProvider);
+  return HttpService(settingsRepo, stateRepo);
+});
+
+/// Provides the message processor for coordinating MQTT/HTTP communication
+final messageProcessorProvider = Provider<MessageProcessor>((ref) {
+  final settingsRepo = ref.watch(settingsRepositoryProvider);
+  final queueRepo = ref.watch(messageQueueRepositoryProvider);
+  final mqttService = ref.watch(mqttServiceProvider);
+  final httpService = ref.watch(httpServiceProvider);
+  final encryptionService = ref.watch(encryptionServiceProvider);
+  return MessageProcessor(
+    settingsRepo,
+    queueRepo,
+    mqttService,
+    httpService,
+    encryptionService,
+  );
+});
+
+/// Provides the tracking service for coordinating location tracking
+final trackingServiceProvider = Provider<TrackingService>((ref) {
+  final locationService = ref.watch(locationServiceProvider);
+  final geofencingService = ref.watch(geofencingServiceProvider);
+  final messageProcessor = ref.watch(messageProcessorProvider);
+  final settingsRepo = ref.watch(settingsRepositoryProvider);
+  final batteryService = ref.watch(batteryServiceProvider);
+  return TrackingService(
+    locationService,
+    geofencingService,
+    messageProcessor,
+    settingsRepo,
+    batteryService,
+  );
 });
 
 // ============================================================================
