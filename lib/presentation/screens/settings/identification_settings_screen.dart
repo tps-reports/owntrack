@@ -1,19 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:owntrack/domain/providers/app_providers.dart';
 
 /// Identification settings screen for device and tracker ID configuration
-class IdentificationSettingsScreen extends StatefulWidget {
+class IdentificationSettingsScreen extends ConsumerStatefulWidget {
   const IdentificationSettingsScreen({super.key});
 
   @override
-  State<IdentificationSettingsScreen> createState() =>
+  ConsumerState<IdentificationSettingsScreen> createState() =>
       _IdentificationSettingsScreenState();
 }
 
 class _IdentificationSettingsScreenState
-    extends State<IdentificationSettingsScreen> {
+    extends ConsumerState<IdentificationSettingsScreen> {
   final TextEditingController _deviceIdController = TextEditingController();
   final TextEditingController _trackerIdController =
       TextEditingController(text: 'XX');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  void _loadSettings() {
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+    setState(() {
+      _deviceIdController.text = settingsRepo.getDeviceId();
+      _trackerIdController.text = settingsRepo.getTrackerId();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -110,12 +126,18 @@ class _IdentificationSettingsScreenState
     );
   }
 
-  void _saveSettings() {
-    // TODO: Save settings to repository
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved')),
-    );
-    Navigator.of(context).pop();
+  void _saveSettings() async {
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+
+    await settingsRepo.setDeviceId(_deviceIdController.text);
+    await settingsRepo.setTrackerId(_trackerIdController.text);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Settings saved')),
+      );
+      Navigator.of(context).pop();
+    }
   }
 
   @override

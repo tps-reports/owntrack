@@ -1,18 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:owntrack/core/constants/app_constants.dart';
+import 'package:owntrack/domain/providers/app_providers.dart';
 
 /// Tracking settings screen for location and monitoring configuration
-class TrackingSettingsScreen extends StatefulWidget {
+class TrackingSettingsScreen extends ConsumerStatefulWidget {
   const TrackingSettingsScreen({super.key});
 
   @override
-  State<TrackingSettingsScreen> createState() =>
+  ConsumerState<TrackingSettingsScreen> createState() =>
       _TrackingSettingsScreenState();
 }
 
-class _TrackingSettingsScreenState extends State<TrackingSettingsScreen> {
+class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen> {
   int _monitoringMode = AppConstants.monitoringModeSignificant;
   bool _isTracking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  void _loadSettings() {
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+    setState(() {
+      _monitoringMode = settingsRepo.getMonitoringMode();
+      _isTracking = ref.read(trackingEnabledProvider);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -189,23 +205,33 @@ class _TrackingSettingsScreenState extends State<TrackingSettingsScreen> {
     }
   }
 
-  void _toggleTracking(bool enabled) {
-    // TODO: Start/stop tracking service
-    if (enabled) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Starting location tracking...')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stopping location tracking...')),
-      );
+  void _toggleTracking(bool enabled) async {
+    // Update state provider
+    ref.read(trackingEnabledProvider.notifier).state = enabled;
+
+    if (mounted) {
+      if (enabled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Starting location tracking...')),
+        );
+        // TODO: Start tracking service
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Stopping location tracking...')),
+        );
+        // TODO: Stop tracking service
+      }
     }
   }
 
-  void _saveMonitoringMode(int mode) {
-    // TODO: Save to settings repository
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Monitoring mode set to ${_getModeName(mode)}')),
-    );
+  void _saveMonitoringMode(int mode) async {
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+    await settingsRepo.setMonitoringMode(mode);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Monitoring mode set to ${_getModeName(mode)}')),
+      );
+    }
   }
 }

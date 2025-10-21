@@ -16,10 +16,11 @@ import 'package:owntrack/data/repositories/waypoints_repository.dart';
 // ============================================================================
 
 /// Provides the settings local data source
+/// This is overridden in main.dart with a real SharedPreferences instance
 final settingsLocalDataSourceProvider = Provider<SettingsLocalDataSource>((ref) {
-  // Note: This will be properly initialized when SharedPreferences is ready
-  // For now, create a temporary one that will be overridden
-  throw UnimplementedError('SettingsLocalDataSource must be initialized with SharedPreferences');
+  throw UnimplementedError(
+    'SettingsLocalDataSource must be overridden in main.dart with SharedPreferences',
+  );
 });
 
 // ============================================================================

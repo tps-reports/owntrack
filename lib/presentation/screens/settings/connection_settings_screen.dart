@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:owntrack/core/constants/app_constants.dart';
+import 'package:owntrack/domain/providers/app_providers.dart';
 
 /// Connection settings screen for MQTT and HTTP configuration
-class ConnectionSettingsScreen extends StatefulWidget {
+class ConnectionSettingsScreen extends ConsumerStatefulWidget {
   const ConnectionSettingsScreen({super.key});
 
   @override
-  State<ConnectionSettingsScreen> createState() =>
+  ConsumerState<ConnectionSettingsScreen> createState() =>
       _ConnectionSettingsScreenState();
 }
 
-class _ConnectionSettingsScreenState extends State<ConnectionSettingsScreen> {
+class _ConnectionSettingsScreenState extends ConsumerState<ConnectionSettingsScreen> {
   String _connectionMode = AppConstants.connectionModeMqtt;
 
   // MQTT settings
@@ -27,6 +29,27 @@ class _ConnectionSettingsScreenState extends State<ConnectionSettingsScreen> {
 
   // HTTP settings
   final TextEditingController _httpUrlController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  void _loadSettings() {
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+
+    setState(() {
+      _connectionMode = settingsRepo.getConnectionMode();
+      _mqttHostController.text = settingsRepo.getMqttHost();
+      _mqttPortController.text = settingsRepo.getMqttPort().toString();
+      _mqttUseTls = settingsRepo.getMqttUseTls();
+      _mqttUsernameController.text = settingsRepo.getMqttUsername();
+      _mqttPasswordController.text = settingsRepo.getMqttPassword();
+      _mqttClientIdController.text = settingsRepo.getMqttClientId();
+      _httpUrlController.text = settingsRepo.getHttpUrl();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -220,16 +243,33 @@ class _ConnectionSettingsScreenState extends State<ConnectionSettingsScreen> {
     );
   }
 
-  void _saveSettings() {
-    // TODO: Save settings to repository
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved')),
-    );
-    Navigator.of(context).pop();
+  void _saveSettings() async {
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+
+    // Save connection mode
+    await settingsRepo.setConnectionMode(_connectionMode);
+
+    // Save MQTT settings
+    await settingsRepo.setMqttHost(_mqttHostController.text);
+    await settingsRepo.setMqttPort(int.tryParse(_mqttPortController.text) ?? 1883);
+    await settingsRepo.setMqttUseTls(_mqttUseTls);
+    await settingsRepo.setMqttUsername(_mqttUsernameController.text);
+    await settingsRepo.setMqttPassword(_mqttPasswordController.text);
+    await settingsRepo.setMqttClientId(_mqttClientIdController.text);
+
+    // Save HTTP settings
+    await settingsRepo.setHttpUrl(_httpUrlController.text);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Settings saved')),
+      );
+      Navigator.of(context).pop();
+    }
   }
 
   void _testConnection() {
-    // TODO: Test connection
+    // TODO: Test connection with services
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Testing connection...')),
     );
