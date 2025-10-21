@@ -1,24 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:owntrack/domain/providers/app_providers.dart';
+import 'package:owntrack/presentation/screens/contacts/contacts_screen.dart';
+import 'package:owntrack/presentation/screens/regions/regions_screen.dart';
+import 'package:owntrack/presentation/screens/settings/connection_settings_screen.dart';
+import 'package:owntrack/presentation/screens/settings/identification_settings_screen.dart';
+import 'package:owntrack/presentation/screens/settings/tracking_settings_screen.dart';
+import 'package:owntrack/presentation/screens/waypoints/waypoints_screen.dart';
 
 /// Main map screen showing current location, friends, and regions
-class MapScreen extends StatefulWidget {
+class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({super.key});
 
   @override
-  State<MapScreen> createState() => _MapScreenState();
+  ConsumerState<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends ConsumerState<MapScreen> {
   final MapController _mapController = MapController();
-  int _selectedIndex = 0;
 
   // Default location (San Francisco)
   static const LatLng _defaultLocation = LatLng(37.7749, -122.4194);
 
   @override
   Widget build(BuildContext context) {
+    final selectedIndex = ref.watch(selectedNavigationIndexProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('OwnTracks'),
@@ -31,17 +40,17 @@ class _MapScreenState extends State<MapScreen> {
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              setState(() => _selectedIndex = 3);
+              ref.read(selectedNavigationIndexProvider.notifier).state = 3;
             },
             tooltip: 'Settings',
           ),
         ],
       ),
-      body: _buildBody(),
+      body: _buildBody(selectedIndex),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
+        selectedIndex: selectedIndex,
         onDestinationSelected: (index) {
-          setState(() => _selectedIndex = index);
+          ref.read(selectedNavigationIndexProvider.notifier).state = index;
         },
         destinations: const [
           NavigationDestination(
@@ -62,7 +71,7 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ],
       ),
-      floatingActionButton: _selectedIndex == 0
+      floatingActionButton: selectedIndex == 0
           ? FloatingActionButton(
               onPressed: _publishLocation,
               tooltip: 'Publish location',
@@ -72,8 +81,8 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Widget _buildBody() {
-    switch (_selectedIndex) {
+  Widget _buildBody(int selectedIndex) {
+    switch (selectedIndex) {
       case 0:
         return _buildMapView();
       case 1:
@@ -115,53 +124,11 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Widget _buildContactsView() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.people,
-            size: 100,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Contacts',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your tracked contacts will appear here',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
-      ),
-    );
+    return const ContactsScreen();
   }
 
   Widget _buildWaypointsView() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.place,
-            size: 100,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Waypoints',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your saved waypoints will appear here',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
-      ),
-    );
+    return const WaypointsScreen();
   }
 
   Widget _buildSettingsView() {
@@ -173,7 +140,12 @@ class _MapScreenState extends State<MapScreen> {
           subtitle: const Text('MQTT and HTTP settings'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            // TODO: Navigate to connection settings
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const ConnectionSettingsScreen(),
+              ),
+            );
           },
         ),
         ListTile(
@@ -182,7 +154,12 @@ class _MapScreenState extends State<MapScreen> {
           subtitle: const Text('Location tracking preferences'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            // TODO: Navigate to tracking settings
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const TrackingSettingsScreen(),
+              ),
+            );
           },
         ),
         ListTile(
@@ -191,25 +168,26 @@ class _MapScreenState extends State<MapScreen> {
           subtitle: const Text('Device and tracker ID'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            // TODO: Navigate to identification settings
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const IdentificationSettingsScreen(),
+              ),
+            );
           },
         ),
         ListTile(
-          leading: const Icon(Icons.security),
-          title: const Text('Security'),
-          subtitle: const Text('Encryption settings'),
+          leading: const Icon(Icons.location_searching),
+          title: const Text('Regions'),
+          subtitle: const Text('Manage geofence regions'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            // TODO: Navigate to security settings
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.notifications),
-          title: const Text('Notifications'),
-          subtitle: const Text('Alert preferences'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            // TODO: Navigate to notification settings
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const RegionsScreen(),
+              ),
+            );
           },
         ),
         const Divider(),
@@ -218,32 +196,128 @@ class _MapScreenState extends State<MapScreen> {
           title: const Text('About'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            // TODO: Show about dialog
+            _showAboutDialog();
           },
         ),
       ],
     );
   }
 
+  void _showAboutDialog() {
+    showAboutDialog(
+      context: context,
+      applicationName: 'OwnTracks',
+      applicationVersion: '1.0.0',
+      applicationLegalese: '© 2025 OwnTracks\nMIT License',
+      children: [
+        const SizedBox(height: 16),
+        const Text(
+          'A unified Flutter implementation of OwnTracks for Android and iOS.',
+        ),
+      ],
+    );
+  }
+
   List<CircleMarker> _buildRegionCircles() {
-    // TODO: Get regions from repository
-    return [];
+    final regionsAsync = ref.watch(regionsStreamProvider);
+
+    return regionsAsync.when(
+      data: (regions) {
+        return regions
+            .where((r) => r.enabled)
+            .map((region) => CircleMarker(
+                  point: LatLng(region.lat, region.lon),
+                  radius: region.radius,
+                  color: Colors.blue.withOpacity(0.3),
+                  borderColor: Colors.blue,
+                  borderStrokeWidth: 2,
+                ))
+            .toList();
+      },
+      loading: () => [],
+      error: (_, __) => [],
+    );
   }
 
   List<Marker> _buildMarkers() {
     final markers = <Marker>[];
 
-    // TODO: Add current location marker
+    // Add friend markers
+    final friendsAsync = ref.watch(friendsStreamProvider);
+    friendsAsync.whenData((friends) {
+      for (final friend in friends) {
+        if (friend.lat != null && friend.lon != null) {
+          markers.add(
+            Marker(
+              point: LatLng(friend.lat!, friend.lon!),
+              width: 60,
+              height: 60,
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.person_pin,
+                    color: Theme.of(context).colorScheme.secondary,
+                    size: 30,
+                  ),
+                  Text(
+                    friend.displayName,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      backgroundColor: Colors.white,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      }
+    });
 
-    // TODO: Add friend markers
-
-    // TODO: Add waypoint markers
+    // Add waypoint markers
+    final waypointsAsync = ref.watch(waypointsStreamProvider);
+    waypointsAsync.whenData((waypoints) {
+      for (final waypoint in waypoints) {
+        final displayName = waypoint.description.isNotEmpty
+            ? waypoint.description
+            : 'WP';
+        markers.add(
+          Marker(
+            point: LatLng(waypoint.lat, waypoint.lon),
+            width: 60,
+            height: 60,
+            child: Column(
+              children: [
+                Icon(
+                  Icons.place,
+                  color: Theme.of(context).colorScheme.tertiary,
+                  size: 30,
+                ),
+                Text(
+                  displayName,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    backgroundColor: Colors.white,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    });
 
     return markers;
   }
 
   void _centerOnCurrentLocation() {
-    // TODO: Get current location and center map
+    // TODO: Get current location from location service
     _mapController.move(_defaultLocation, 15.0);
   }
 
