@@ -1,6 +1,11 @@
 import 'dart:async';
 
 import 'package:owntrack/core/utils/app_logger.dart';
+import 'package:owntrack/core/utils/platform_utils.dart';
+
+// Conditional import: use web implementation on web, stub on other platforms
+import 'package:owntrack/data/services/battery_service_stub.dart'
+    if (dart.library.js_interop) 'package:owntrack/data/services/battery_service_web.dart';
 
 /// Battery state
 enum BatteryState {
@@ -32,6 +37,11 @@ class BatteryInfo {
 ///
 /// Monitors device battery level and charging state.
 /// Provides battery information for location messages.
+///
+/// **Web Platform Notes:**
+/// - Uses Battery Status API when available (with feature detection)
+/// - Falls back to default values if API is not supported
+/// - Some browsers have deprecated the API for privacy reasons
 class BatteryService {
   BatteryInfo? _lastBatteryInfo;
   Timer? _batteryTimer;
@@ -52,7 +62,15 @@ class BatteryService {
     // Get initial battery state
     _updateBatteryInfo();
 
-    // Check battery every 5 minutes
+    // On web, also set up battery event listeners if supported
+    if (PlatformUtils.isWeb) {
+      BatteryServiceWeb.addBatteryListeners((info) {
+        _lastBatteryInfo = info;
+        _batteryController.add(info);
+      });
+    }
+
+    // Check battery every 5 minutes (fallback polling)
     _batteryTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       _updateBatteryInfo();
     });
@@ -88,9 +106,14 @@ class BatteryService {
   /// Get current battery information
   Future<BatteryInfo> _getBatteryInfo() async {
     // TODO: Implement actual battery monitoring using battery_plus package
-    // or platform channels. For now, return simulated data.
+    // or platform channels for mobile platforms.
 
-    // Simulated battery data
+    if (PlatformUtils.isWeb) {
+      // Use Battery Status API on web with feature detection
+      return await BatteryServiceWeb.getBatteryInfo();
+    }
+
+    // Simulated battery data for mobile (TODO: use battery_plus)
     return const BatteryInfo(
       level: 85,
       state: BatteryState.discharging,

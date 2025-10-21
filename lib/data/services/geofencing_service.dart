@@ -32,6 +32,16 @@ class GeofenceTransition {
 ///
 /// Monitors when the device enters or exits defined geographic regions.
 /// Uses distance-based monitoring for cross-platform compatibility.
+///
+/// **Platform Support:**
+/// - **Mobile (Android/iOS)**: Foreground and background monitoring
+/// - **Web**: Foreground-only monitoring (while app is running)
+///   - Manual distance checking on each location update
+///   - Works perfectly for active tracking scenarios
+///   - No background geofence triggers (browser limitation)
+///
+/// The service automatically checks each location update against all enabled
+/// regions and fires enter/exit events when transitions occur.
 class GeofencingService {
   final RegionsRepository _regionsRepository;
 

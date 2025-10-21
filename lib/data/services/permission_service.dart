@@ -1,5 +1,6 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:owntrack/core/utils/app_logger.dart';
+import 'package:owntrack/core/utils/platform_utils.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
 
 /// Permission status for the app
@@ -14,6 +15,12 @@ enum AppPermissionStatus {
 ///
 /// Handles location, notification, and background permissions
 /// with proper error handling and user feedback.
+///
+/// **Web Platform Notes:**
+/// - Uses browser's permission API via geolocator
+/// - Background location not supported (browser security)
+/// - Notification permission handled via browser's Notification API
+/// - No app settings to open (returns false on web)
 class PermissionService {
   /// Check location permission status
   Future<AppPermissionStatus> checkLocationPermission() async {
@@ -67,6 +74,11 @@ class PermissionService {
   /// Check if background location is enabled (Android 10+, iOS always)
   Future<bool> checkBackgroundLocationPermission() async {
     try {
+      // Web browsers don't support background location
+      if (PlatformUtils.isWeb) {
+        return false;
+      }
+
       // On Android 10+, check ACCESS_BACKGROUND_LOCATION
       // On iOS, location permission already includes background
       if (await _isAndroid10OrHigher()) {
@@ -87,6 +99,12 @@ class PermissionService {
   Future<AppPermissionStatus> requestBackgroundLocationPermission() async {
     try {
       AppLogger.i('Requesting background location permission');
+
+      // Web browsers don't support background location
+      if (PlatformUtils.isWeb) {
+        AppLogger.w('Background location not supported on web');
+        return AppPermissionStatus.denied;
+      }
 
       if (await _isAndroid10OrHigher()) {
         final status = await ph.Permission.locationAlways.request();
@@ -114,6 +132,12 @@ class PermissionService {
   /// Check notification permission status
   Future<AppPermissionStatus> checkNotificationPermission() async {
     try {
+      // Web: notification permission is handled by browser's Notification API
+      // permission_handler doesn't work well on web, so we'll return granted
+      if (PlatformUtils.isWeb) {
+        return AppPermissionStatus.granted;
+      }
+
       final status = await ph.Permission.notification.status;
 
       if (status.isGranted) {
@@ -135,6 +159,13 @@ class PermissionService {
   Future<AppPermissionStatus> requestNotificationPermission() async {
     try {
       AppLogger.i('Requesting notification permission');
+
+      // Web: browser handles notification permission via Notification API
+      if (PlatformUtils.isWeb) {
+        AppLogger.i('Notification permission on web (handled by browser)');
+        return AppPermissionStatus.granted;
+      }
+
       final status = await ph.Permission.notification.request();
 
       if (status.isGranted) {
@@ -166,6 +197,12 @@ class PermissionService {
   /// Open app settings (for when permission is permanently denied)
   Future<bool> openAppSettings() async {
     try {
+      // Web browsers don't have app settings to open
+      if (PlatformUtils.isWeb) {
+        AppLogger.w('Cannot open app settings on web');
+        return false;
+      }
+
       AppLogger.i('Opening app settings');
       return await ph.openAppSettings();
     } catch (e) {

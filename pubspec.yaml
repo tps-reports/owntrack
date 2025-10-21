@@ -59,6 +59,9 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.8
 
+  # Web APIs (web platform only)
+  web: ^1.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

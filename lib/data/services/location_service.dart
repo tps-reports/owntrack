@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:geolocator/geolocator.dart';
 import 'package:owntrack/core/constants/app_constants.dart';
 import 'package:owntrack/core/utils/app_logger.dart';
+import 'package:owntrack/core/utils/platform_utils.dart';
 import 'package:owntrack/data/models/location_update.dart';
 import 'package:owntrack/data/repositories/settings_repository.dart';
 
@@ -10,6 +11,12 @@ import 'package:owntrack/data/repositories/settings_repository.dart';
 ///
 /// Handles foreground and background location updates with support for
 /// different monitoring modes (quiet, manual, significant, move).
+///
+/// **Web Platform Notes:**
+/// - Uses browser's Geolocation API via geolocator_web
+/// - No background location tracking (browser security limitation)
+/// - Requires HTTPS for production deployments
+/// - User must grant location permission via browser prompt
 class LocationService {
   final SettingsRepository _settingsRepository;
 
@@ -89,10 +96,14 @@ class LocationService {
   /// Start location tracking based on monitoring mode
   Future<bool> startTracking() async {
     try {
-      final serviceEnabled = await isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        AppLogger.e('Location services are disabled');
-        return false;
+      // Web browser geolocation doesn't have a "service enabled" concept
+      // Skip check on web to avoid false negatives
+      if (!PlatformUtils.isWeb) {
+        final serviceEnabled = await isLocationServiceEnabled();
+        if (!serviceEnabled) {
+          AppLogger.e('Location services are disabled');
+          return false;
+        }
       }
 
       LocationPermission permission = await checkPermission();
@@ -112,7 +123,11 @@ class LocationService {
       final monitoringMode = _settingsRepository.getMonitoringMode();
       final settings = _getLocationSettings(monitoringMode);
 
-      AppLogger.i('Starting location tracking with mode: $monitoringMode');
+      if (PlatformUtils.isWeb) {
+        AppLogger.i('Starting location tracking on web (foreground only)');
+      } else {
+        AppLogger.i('Starting location tracking with mode: $monitoringMode');
+      }
 
       _positionSubscription = Geolocator.getPositionStream(
         locationSettings: settings,
