@@ -1,0 +1,28 @@
+# build.yaml configuration for code generation
+targets:
+  $default:
+    builders:
+      json_serializable:
+        options:
+          # Generate explicit toJson
+          explicit_to_json: true
+          # Field rename strategy
+          field_rename: snake
+          # Include if null
+          include_if_null: false
+          # Check required
+          checked: true
+          # Create factory
+          create_factory: true
+          # Create to json
+          create_to_json: true
+
+      freezed:
+        options:
+          # Use Freezed with json_serializable
+          json_serializable: true
+
+      riverpod_generator:
+        options:
+          # Riverpod lint
+          lint: true
