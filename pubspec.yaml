@@ -18,10 +18,6 @@ dependencies:
   # Navigation
   go_router: ^14.6.2
 
-  # Data & Models
-  freezed_annotation: ^2.4.4
-  json_annotation: ^4.9.0
-
   # Database
   drift: ^2.20.3
   sqlite3_flutter_libs: ^0.5.24
@@ -75,8 +71,6 @@ dev_dependencies:
   # Code Generation
   build_runner: ^2.4.15
   riverpod_generator: ^2.6.2
-  freezed: ^2.5.7
-  json_serializable: ^6.9.2
   drift_dev: ^2.20.3
 
   # Testing
