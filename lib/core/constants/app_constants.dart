@@ -30,9 +30,11 @@ class AppConstants {
   static const int monitoringModeSignificant = 1;
   static const int monitoringModeMove = 2;
 
-  // Defaults
-  static const int defaultMqttPort = 1883;
+  // Defaults — MQTTS-only: secure port is the new default; plain :1883 is
+  // internal Docker-network only on the FiveX platform's stage/prod.
+  static const int defaultMqttPort = 8883;
   static const int defaultMqttTlsPort = 8883;
+  static const bool defaultMqttUseTls = true;
   static const Duration defaultLocationUpdateInterval = Duration(minutes: 5);
   static const double defaultLocationAccuracyThreshold = 50.0; // meters
 
