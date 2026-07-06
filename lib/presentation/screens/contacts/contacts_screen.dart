@@ -112,7 +112,7 @@ class ContactsScreen extends ConsumerWidget {
           Icon(
             Icons.people_outline,
             size: 100,
-            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(

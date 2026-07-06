@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:owntrack/core/utils/platform_utils.dart';
+import 'package:owntrack/domain/providers/app_providers.dart';
 
 /// Settings screen for app configuration
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
@@ -49,6 +52,39 @@ class SettingsScreen extends StatelessWidget {
             },
           ),
           const Divider(),
+          if (PlatformUtils.isWeb) ...[
+            ListTile(
+              leading: const Icon(Icons.phone_android),
+              title: const Text('Open in Mobile App'),
+              subtitle: const Text('Launch the mobile app with your settings'),
+              trailing: const Icon(Icons.open_in_new),
+              onTap: () async {
+                final appLauncher = ref.read(appLauncherServiceProvider);
+                final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+                // Show loading indicator
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Launching mobile app...'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+
+                final success = await appLauncher.launchAppWithSettings();
+
+                if (!success) {
+                  scaffoldMessenger.hideCurrentSnackBar();
+                  scaffoldMessenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Unable to launch app. Please try again.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+            ),
+            const Divider(),
+          ],
           ListTile(
             leading: const Icon(Icons.info),
             title: const Text('About'),

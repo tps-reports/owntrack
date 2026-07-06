@@ -10,6 +10,7 @@ import 'package:owntrack/data/repositories/message_queue_repository.dart';
 import 'package:owntrack/data/repositories/regions_repository.dart';
 import 'package:owntrack/data/repositories/settings_repository.dart';
 import 'package:owntrack/data/repositories/waypoints_repository.dart';
+import 'package:owntrack/data/services/app_launcher_service.dart';
 import 'package:owntrack/data/services/battery_service.dart';
 import 'package:owntrack/data/services/encryption_service.dart';
 import 'package:owntrack/data/services/geofencing_service.dart';
@@ -152,6 +153,12 @@ final trackingServiceProvider = Provider<TrackingService>((ref) {
     settingsRepo,
     batteryService,
   );
+});
+
+/// Provides the app launcher service for launching mobile app from web
+final appLauncherServiceProvider = Provider<AppLauncherService>((ref) {
+  final settingsRepo = ref.watch(settingsRepositoryProvider);
+  return AppLauncherService(settingsRepo);
 });
 
 // ============================================================================

@@ -36,7 +36,7 @@ dependencies:
   # workmanager: ^0.5.2  # TODO: Add back in Phase 3 (has compatibility issues)
 
   # Maps - using flutter_map as requested
-  flutter_map: ^7.0.2
+  flutter_map: ^8.0.0
   latlong2: ^0.9.1
 
   # Security & Encryption
@@ -80,6 +80,16 @@ dev_dependencies:
   mocktail: ^1.0.4
   integration_test:
     sdk: flutter
+
+  # App icon
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#1E40AF"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

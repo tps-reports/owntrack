@@ -119,29 +119,44 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 16),
-                  _buildModeOption(
-                    mode: AppConstants.monitoringModeQuiet,
-                    icon: Icons.bedtime,
-                    title: 'Quiet',
-                    subtitle: 'Minimal tracking for battery saving',
-                  ),
-                  _buildModeOption(
-                    mode: AppConstants.monitoringModeManual,
-                    icon: Icons.touch_app,
-                    title: 'Manual',
-                    subtitle: 'Only when you publish manually',
-                  ),
-                  _buildModeOption(
-                    mode: AppConstants.monitoringModeSignificant,
-                    icon: Icons.directions_walk,
-                    title: 'Significant',
-                    subtitle: 'Balanced tracking (recommended)',
-                  ),
-                  _buildModeOption(
-                    mode: AppConstants.monitoringModeMove,
-                    icon: Icons.directions_run,
-                    title: 'Move',
-                    subtitle: 'Frequent updates for navigation',
+                  RadioGroup<int>(
+                    groupValue: _monitoringMode,
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _monitoringMode = value;
+                        });
+                        _saveMonitoringMode(value);
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        _buildModeOption(
+                          mode: AppConstants.monitoringModeQuiet,
+                          icon: Icons.bedtime,
+                          title: 'Quiet',
+                          subtitle: 'Minimal tracking for battery saving',
+                        ),
+                        _buildModeOption(
+                          mode: AppConstants.monitoringModeManual,
+                          icon: Icons.touch_app,
+                          title: 'Manual',
+                          subtitle: 'Only when you publish manually',
+                        ),
+                        _buildModeOption(
+                          mode: AppConstants.monitoringModeSignificant,
+                          icon: Icons.directions_walk,
+                          title: 'Significant',
+                          subtitle: 'Balanced tracking (recommended)',
+                        ),
+                        _buildModeOption(
+                          mode: AppConstants.monitoringModeMove,
+                          icon: Icons.directions_run,
+                          title: 'Move',
+                          subtitle: 'Frequent updates for navigation',
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -207,15 +222,6 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
 
     return RadioListTile<int>(
       value: mode,
-      groupValue: _monitoringMode,
-      onChanged: (value) {
-        if (value != null) {
-          setState(() {
-            _monitoringMode = value;
-          });
-          _saveMonitoringMode(value);
-        }
-      },
       title: Row(
         children: [
           Icon(icon, size: 20),

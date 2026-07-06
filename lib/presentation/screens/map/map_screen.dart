@@ -110,6 +110,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.cf.fivex.owntrack',
           maxZoom: 19,
+          tileProvider: NetworkTileProvider(),
         ),
         // Regions layer (circles)
         CircleLayer(
@@ -228,7 +229,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             .map((region) => CircleMarker(
                   point: LatLng(region.lat, region.lon),
                   radius: region.radius,
-                  color: Colors.blue.withOpacity(0.3),
+                  color: Colors.blue.withValues(alpha: 0.3),
                   borderColor: Colors.blue,
                   borderStrokeWidth: 2,
                 ))

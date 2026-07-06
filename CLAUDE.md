@@ -51,7 +51,7 @@ flutter test --plain-name "SettingsRepository"
 flutter analyze
 
 # Format code
-flutter format lib/ test/
+dart format lib/ test/
 
 # Fix auto-fixable issues
 dart fix --apply
@@ -357,15 +357,7 @@ test/
 
 ### Code Generation
 
-**Riverpod Generator:**
-- Not currently used, but build.yaml configured
-- Use manual providers in `app_providers.dart`
-- Run `flutter pub run build_runner build` after changes
-
-**Build Configuration** (`build.yaml`):
-- Configured for json_serializable (not used - manual JSON)
-- Configured for freezed (not used)
-- Configured for riverpod_generator (not used)
+`build.yaml` configures json_serializable, freezed, and riverpod_generator. Currently providers are defined manually in `app_providers.dart`. Run `flutter pub run build_runner build --delete-conflicting-outputs` after changes to generated code.
 
 ### Linting Rules
 

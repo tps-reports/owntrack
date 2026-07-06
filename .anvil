@@ -1,0 +1,26 @@
+node:
+  name: owntrack
+  type: flutter_app
+  category: demo
+  description: OwnTracks-compatible location sharing with MQTT and maps
+
+build:
+  platforms:
+    web_wasm:
+      builder: flutter_web
+      params:
+        wasm: true
+        no_tree_shake_icons: true
+        base_href: "/owntrack/"
+      artifact: "build/web/"
+      host_path: "/owntrack/"
+
+version:
+  source: git_tag
+
+environments:
+  local:
+    mode: native
+    config_url: "https://dev.2h2.us:8443?env=local"
+    targets:
+      web_wasm: flutter_run_chrome

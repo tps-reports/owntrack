@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1E40AF"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="200" ry="200" fill="url(#bg)"/>
+  <!-- Compass outer ring -->
+  <circle cx="512" cy="480" r="280" fill="none" stroke="white" stroke-width="20" opacity="0.9"/>
+  <circle cx="512" cy="480" r="260" fill="none" stroke="white" stroke-width="3" opacity="0.4"/>
+  <!-- Compass tick marks -->
+  <line x1="512" y1="200" x2="512" y2="250" stroke="white" stroke-width="14" stroke-linecap="round"/>
+  <line x1="512" y1="710" x2="512" y2="760" stroke="white" stroke-width="14" stroke-linecap="round"/>
+  <line x1="232" y1="480" x2="282" y2="480" stroke="white" stroke-width="14" stroke-linecap="round"/>
+  <line x1="742" y1="480" x2="792" y2="480" stroke="white" stroke-width="14" stroke-linecap="round"/>
+  <!-- Compass rose - North pointer -->
+  <polygon points="512,260 480,460 512,420 544,460" fill="white"/>
+  <!-- Compass rose - South pointer -->
+  <polygon points="512,700 480,500 512,540 544,500" fill="white" opacity="0.5"/>
+  <!-- Compass rose - East pointer -->
+  <polygon points="740,480 540,448 580,480 540,512" fill="white" opacity="0.5"/>
+  <!-- Compass rose - West pointer -->
+  <polygon points="284,480 484,448 444,480 484,512" fill="white" opacity="0.5"/>
+  <!-- Location pin in center -->
+  <path d="M512 420 C485 420 464 441 464 468 C464 505 512 555 512 555 C512 555 560 505 560 468 C560 441 539 420 512 420 Z" fill="white"/>
+  <circle cx="512" cy="468" r="18" fill="#1E40AF"/>
+  <!-- N letter -->
+  <text x="512" y="188" text-anchor="middle" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="white">N</text>
+</svg>
