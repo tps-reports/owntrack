@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:owntrack/core/constants/app_constants.dart';
 import 'package:owntrack/data/services/permission_service.dart';
@@ -281,7 +281,7 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
       if (mounted) {
         if (started) {
           // Update state provider
-          ref.read(trackingEnabledProvider.notifier).state = true;
+          ref.read(trackingEnabledProvider.notifier).setEnabled(true);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Location tracking started'),
@@ -312,7 +312,7 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
 
       if (mounted) {
         // Update state provider
-        ref.read(trackingEnabledProvider.notifier).state = false;
+        ref.read(trackingEnabledProvider.notifier).setEnabled(false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Location tracking stopped'),

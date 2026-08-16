@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
@@ -40,7 +40,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              ref.read(selectedNavigationIndexProvider.notifier).state = 3;
+              ref.read(selectedNavigationIndexProvider.notifier).setIndex(3);
             },
             tooltip: 'Settings',
           ),
@@ -50,7 +50,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) {
-          ref.read(selectedNavigationIndexProvider.notifier).state = index;
+          ref.read(selectedNavigationIndexProvider.notifier).setIndex(index);
         },
         destinations: const [
           NavigationDestination(

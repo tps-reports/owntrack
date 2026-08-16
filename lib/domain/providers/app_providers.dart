@@ -188,22 +188,55 @@ final regionsStreamProvider = FutureProvider<List<Region>>((ref) async {
 // State Providers for UI State
 // ============================================================================
 
+/// Holds the current monitoring mode.
+class MonitoringModeNotifier extends Notifier<int> {
+  @override
+  int build() => 1; // Default to Significant mode
+
+  void setMode(int mode) => state = mode;
+}
+
 /// Provides the current monitoring mode
-final monitoringModeProvider = StateProvider<int>((ref) {
-  return 1; // Default to Significant mode
-});
+final monitoringModeProvider = NotifierProvider<MonitoringModeNotifier, int>(
+  MonitoringModeNotifier.new,
+);
+
+/// Holds whether tracking is currently enabled.
+class TrackingEnabledNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void setEnabled(bool enabled) => state = enabled;
+}
 
 /// Provides the tracking enabled state
-final trackingEnabledProvider = StateProvider<bool>((ref) {
-  return false;
-});
+final trackingEnabledProvider = NotifierProvider<TrackingEnabledNotifier, bool>(
+  TrackingEnabledNotifier.new,
+);
+
+/// Holds the connection mode (MQTT or HTTP).
+class ConnectionModeNotifier extends Notifier<String> {
+  @override
+  String build() => 'mqtt'; // Default to MQTT
+
+  void setMode(String mode) => state = mode;
+}
 
 /// Provides the connection mode (MQTT or HTTP)
-final connectionModeProvider = StateProvider<String>((ref) {
-  return 'mqtt'; // Default to MQTT
-});
+final connectionModeProvider = NotifierProvider<ConnectionModeNotifier, String>(
+  ConnectionModeNotifier.new,
+);
+
+/// Holds the selected bottom navigation index.
+class SelectedNavigationIndexNotifier extends Notifier<int> {
+  @override
+  int build() => 0; // Default to Map view
+
+  void setIndex(int index) => state = index;
+}
 
 /// Provides the selected bottom navigation index
-final selectedNavigationIndexProvider = StateProvider<int>((ref) {
-  return 0; // Default to Map view
-});
+final selectedNavigationIndexProvider =
+    NotifierProvider<SelectedNavigationIndexNotifier, int>(
+      SelectedNavigationIndexNotifier.new,
+    );
