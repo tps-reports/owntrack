@@ -14,13 +14,37 @@ build:
         base_href: "/owntrack/"
       artifact: "build/web/"
       host_path: "/owntrack/"
+    macos:
+      artifact: "build/macos/Build/Products/Release/owntrack.app"
+    android_apk:
+      artifact: "build/app/outputs/flutter-apk/app-release.apk"
 
 version:
   source: git_tag
 
+connections:
+  - target: mosquitto
+    type: mqtt
+  - target: nginx
+    type: gateway
+
 environments:
   local:
     mode: native
-    config_url: "https://dev.2h2.us:8443?env=local"
+    config_url: "https://dev.2h2.us:443?mqtt_host=localhost&mqtt_port=1883&rp_id=dev.2h2.us&env=local"
     targets:
       web_wasm: flutter_run_chrome
+      macos: local_launch
+      android_apk: adb_install
+  dev:
+    mode: host_artifact
+    config_url: "https://dev.2h2.us:443?mqtt_host=dev.2h2.us&mqtt_port=443&rp_id=dev.2h2.us&env=dev"
+    targets:
+      web_wasm: nginx_static
+      android_apk: adb_install
+  prod:
+    mode: host_artifact
+    config_url: "https://2h2.us:443?mqtt_host=2h2.us&mqtt_port=443&rp_id=2h2.us&env=prod"
+    targets:
+      web_wasm: nginx_static
+      android_apk: adb_install

@@ -7,7 +7,10 @@ plugins {
 
 android {
     namespace = "com.cf.fivex.owntrack"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned to the latest stable platform. Flutter's default currently
+    // resolves to 37, which the SDK installs as "android-37.0"; AGP resolves
+    // targets by the exact hash string "android-37" and fails to find it.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -21,7 +24,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.cf.fivex.owntrack"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -33,8 +35,10 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Release signing is not configured in this repository: a release
+            // keystore is a secret and must not be committed. This signs with
+            // the debug keys so `flutter run --release` works locally. Wire a
+            // real keystore via key.properties before distributing a build.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -45,5 +49,5 @@ flutter {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

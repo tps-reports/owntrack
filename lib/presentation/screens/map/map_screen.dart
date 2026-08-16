@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:owntrack/core/utils/app_logger.dart';
 import 'package:owntrack/domain/providers/app_providers.dart';
 import 'package:owntrack/presentation/screens/contacts/contacts_screen.dart';
 import 'package:owntrack/presentation/screens/regions/regions_screen.dart';
@@ -236,7 +237,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             .toList();
       },
       loading: () => [],
-      error: (_, __) => [],
+      error: (_, _) => [],
     );
   }
 
@@ -317,16 +318,52 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return markers;
   }
 
-  void _centerOnCurrentLocation() {
-    // TODO: Get current location from location service
-    _mapController.move(_defaultLocation, 15.0);
+  Future<void> _centerOnCurrentLocation() async {
+    final update = await ref.read(locationServiceProvider).getCurrentLocation();
+    if (!mounted) return;
+
+    if (update == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not determine your location. Check that location services '
+            'are enabled and permission is granted.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    _mapController.move(LatLng(update.latitude, update.longitude), 15.0);
   }
 
-  void _publishLocation() {
-    // TODO: Trigger location publish
-    ScaffoldMessenger.of(context).showSnackBar(
+  Future<void> _publishLocation() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
       const SnackBar(content: Text('Publishing location...')),
     );
+
+    try {
+      await ref.read(trackingServiceProvider).publishCurrentLocation();
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Location published')),
+        );
+    } catch (e) {
+      AppLogger.e('Manual location publish failed: $e');
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              e is StateError ? e.message : 'Could not publish location: $e',
+            ),
+          ),
+        );
+    }
   }
 
   @override

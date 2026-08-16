@@ -156,39 +156,50 @@ class TrackingService {
   }
 
   /// Publish location update
+  /// Publish a location from the automatic tracking stream.
+  ///
+  /// Failures are logged but not propagated: a single failed publish must not
+  /// tear down the long-running location subscription. The message queue in
+  /// [MessageProcessor] is responsible for retrying.
   Future<void> _publishLocation(LocationUpdate location) async {
     try {
-      final deviceId = _settingsRepository.getDeviceId();
-      final trackerId = _settingsRepository.getTrackerId();
-
-      // Get current regions
-      final inRegions = _geofencingService.getCurrentRegions();
-
-      // Create location message
-      final message = {
-        '_type': 'location',
-        'tid': trackerId.isNotEmpty ? trackerId : 'XX',
-        'lat': location.latitude,
-        'lon': location.longitude,
-        'tst': location.timestampSeconds,
-        'acc': location.accuracy.toInt(),
-        'alt': (location.altitude ?? 0).toInt(),
-        'vel': (location.speedKmH ?? 0).toInt(),
-        'cog': (location.heading ?? 0).toInt(),
-        'batt': _batteryService.batteryLevel,
-        if (inRegions.isNotEmpty) 'inregions': inRegions,
-      };
-
-      final topic = 'owntracks/$deviceId/$trackerId';
-      await _messageProcessor.sendMessage(message, topic: topic);
-
-      _lastPublishTime = DateTime.now();
-      _lastPublishedLocation = location;
-
+      await _sendLocationMessage(location);
       AppLogger.i('Published location update');
     } catch (e) {
       AppLogger.e('Error publishing location: $e');
     }
+  }
+
+  /// Build and send the OwnTracks location message.
+  ///
+  /// Throws if the message cannot be handed to the message processor.
+  Future<void> _sendLocationMessage(LocationUpdate location) async {
+    final deviceId = _settingsRepository.getDeviceId();
+    final trackerId = _settingsRepository.getTrackerId();
+
+    // Get current regions
+    final inRegions = _geofencingService.getCurrentRegions();
+
+    // Create location message
+    final message = {
+      '_type': 'location',
+      'tid': trackerId.isNotEmpty ? trackerId : 'XX',
+      'lat': location.latitude,
+      'lon': location.longitude,
+      'tst': location.timestampSeconds,
+      'acc': location.accuracy.toInt(),
+      'alt': (location.altitude ?? 0).toInt(),
+      'vel': (location.speedKmH ?? 0).toInt(),
+      'cog': (location.heading ?? 0).toInt(),
+      'batt': _batteryService.batteryLevel,
+      if (inRegions.isNotEmpty) 'inregions': inRegions,
+    };
+
+    final topic = 'owntracks/$deviceId/$trackerId';
+    await _messageProcessor.sendMessage(message, topic: topic);
+
+    _lastPublishTime = DateTime.now();
+    _lastPublishedLocation = location;
   }
 
   /// Publish geofence transition
@@ -218,16 +229,25 @@ class TrackingService {
   }
 
   /// Publish current location on demand
+  /// Publish the current location on demand.
+  ///
+  /// Unlike the automatic tracking path this propagates failures, so a caller
+  /// driving it from the UI can tell the user what went wrong. Throws
+  /// [StateError] when the current position cannot be determined.
   Future<void> publishCurrentLocation() async {
-    try {
-      AppLogger.i('Publishing current location on demand');
-      final location = await _locationService.getCurrentLocation();
-      if (location != null) {
-        await _publishLocation(location);
-      }
-    } catch (e) {
-      AppLogger.e('Error publishing current location: $e');
+    AppLogger.i('Publishing current location on demand');
+
+    final location = await _locationService.getCurrentLocation();
+    if (location == null) {
+      AppLogger.e('Cannot publish: current location unavailable');
+      throw StateError(
+        'Location unavailable. Check that location services are enabled and '
+        'permission is granted.',
+      );
     }
+
+    await _sendLocationMessage(location);
+    AppLogger.i('Published location on demand');
   }
 
   /// Get current tracking status

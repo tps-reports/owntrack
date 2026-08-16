@@ -74,19 +74,20 @@ class PermissionService {
   /// Check if background location is enabled (Android 10+, iOS always)
   Future<bool> checkBackgroundLocationPermission() async {
     try {
-      // Web browsers don't support background location
-      if (PlatformUtils.isWeb) {
+      // Only mobile platforms support background location. Web browsers
+      // block it outright, and desktop has no permission_handler backend.
+      if (!PlatformUtils.supportsBackgroundLocation) {
         return false;
       }
 
-      // On Android 10+, check ACCESS_BACKGROUND_LOCATION
-      // On iOS, location permission already includes background
-      if (await _isAndroid10OrHigher()) {
+      // Android gates background location behind a separate
+      // ACCESS_BACKGROUND_LOCATION grant.
+      if (PlatformUtils.isAndroid) {
         final status = await ph.Permission.locationAlways.status;
         return status.isGranted;
       }
 
-      // For iOS or older Android, check regular location permission
+      // On iOS the "always" authorization is part of the location permission
       final locationStatus = await checkLocationPermission();
       return locationStatus == AppPermissionStatus.granted;
     } catch (e) {
@@ -100,13 +101,15 @@ class PermissionService {
     try {
       AppLogger.i('Requesting background location permission');
 
-      // Web browsers don't support background location
-      if (PlatformUtils.isWeb) {
-        AppLogger.w('Background location not supported on web');
+      // Only mobile platforms support background location.
+      if (!PlatformUtils.supportsBackgroundLocation) {
+        AppLogger.w(
+          'Background location not supported on ${PlatformUtils.platformName}',
+        );
         return AppPermissionStatus.denied;
       }
 
-      if (await _isAndroid10OrHigher()) {
+      if (PlatformUtils.isAndroid) {
         final status = await ph.Permission.locationAlways.request();
 
         if (status.isGranted) {
@@ -121,7 +124,7 @@ class PermissionService {
         }
       }
 
-      // For iOS or older Android, background is included in regular permission
+      // On iOS the "always" authorization is part of the location permission
       return await requestLocationPermission();
     } catch (e) {
       AppLogger.e('Error requesting background location permission: $e');
@@ -132,9 +135,10 @@ class PermissionService {
   /// Check notification permission status
   Future<AppPermissionStatus> checkNotificationPermission() async {
     try {
-      // Web: notification permission is handled by browser's Notification API
-      // permission_handler doesn't work well on web, so we'll return granted
-      if (PlatformUtils.isWeb) {
+      // permission_handler only ships a notification backend on Android/iOS.
+      // Web delegates to the browser's Notification API; desktop has no
+      // backend at all, so calling through would throw MissingPluginException.
+      if (!PlatformUtils.supportsNotifications) {
         return AppPermissionStatus.granted;
       }
 
@@ -160,9 +164,13 @@ class PermissionService {
     try {
       AppLogger.i('Requesting notification permission');
 
-      // Web: browser handles notification permission via Notification API
-      if (PlatformUtils.isWeb) {
-        AppLogger.i('Notification permission on web (handled by browser)');
+      // Web delegates to the browser's Notification API; desktop has no
+      // permission_handler backend.
+      if (!PlatformUtils.supportsNotifications) {
+        AppLogger.i(
+          'Notification permission handled by platform on '
+          '${PlatformUtils.platformName}',
+        );
         return AppPermissionStatus.granted;
       }
 
@@ -197,9 +205,11 @@ class PermissionService {
   /// Open app settings (for when permission is permanently denied)
   Future<bool> openAppSettings() async {
     try {
-      // Web browsers don't have app settings to open
-      if (PlatformUtils.isWeb) {
-        AppLogger.w('Cannot open app settings on web');
+      // ph.openAppSettings() is only implemented on Android/iOS.
+      if (!PlatformUtils.isMobile) {
+        AppLogger.w(
+          'Cannot open app settings on ${PlatformUtils.platformName}',
+        );
         return false;
       }
 
@@ -242,13 +252,5 @@ class PermissionService {
     return locationStatus == AppPermissionStatus.granted &&
         backgroundLocationStatus &&
         notificationStatus == AppPermissionStatus.granted;
-  }
-
-  /// Helper to check if running on Android 10+
-  Future<bool> _isAndroid10OrHigher() async {
-    // This is a simplified check. In a real app, you'd use platform channels
-    // or device_info_plus to properly detect Android version.
-    // For now, we'll assume modern Android.
-    return true;
   }
 }
