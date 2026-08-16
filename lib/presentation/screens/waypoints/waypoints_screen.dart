@@ -99,11 +99,6 @@ class WaypointsScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addWaypoint(context, ref),
-        icon: const Icon(Icons.add_location),
-        label: const Text('Add Waypoint'),
-      ),
     );
   }
 
@@ -167,109 +162,6 @@ class WaypointsScreen extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  Future<void> _addWaypoint(BuildContext context, WidgetRef ref) async {
-    final descController = TextEditingController();
-    final latController = TextEditingController();
-    final lonController = TextEditingController();
-    final radiusController = TextEditingController(text: '100');
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Waypoint'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: descController,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  hintText: 'Home',
-                ),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: latController,
-                decoration: const InputDecoration(
-                  labelText: 'Latitude',
-                  hintText: '37.7749',
-                ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: lonController,
-                decoration: const InputDecoration(
-                  labelText: 'Longitude',
-                  hintText: '-122.4194',
-                ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: radiusController,
-                decoration: const InputDecoration(
-                  labelText: 'Radius (meters)',
-                  hintText: '100',
-                ),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true && context.mounted) {
-      final lat = double.tryParse(latController.text);
-      final lon = double.tryParse(lonController.text);
-      final radius = double.tryParse(radiusController.text) ?? 100;
-
-      if (lat != null && lon != null) {
-        final waypoint = Waypoint(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          lat: lat,
-          lon: lon,
-          timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-          description: descController.text,
-          radius: radius,
-        );
-
-        final repository = ref.read(waypointsRepositoryProvider);
-        await repository.addWaypoint(waypoint);
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Waypoint added')),
-          );
-        }
-      }
-    }
-
-    descController.dispose();
-    latController.dispose();
-    lonController.dispose();
-    radiusController.dispose();
   }
 
   Future<void> _editWaypoint(
