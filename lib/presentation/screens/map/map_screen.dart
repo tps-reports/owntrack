@@ -2,10 +2,12 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:owntrack/core/config/map_tiler_config.dart';
 import 'package:owntrack/core/utils/app_logger.dart';
 import 'package:owntrack/data/models/waypoint.dart';
 import 'package:owntrack/domain/providers/app_providers.dart';
 import 'package:owntrack/presentation/widgets/waypoint_form_dialog.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:owntrack/presentation/screens/contacts/contacts_screen.dart';
 import 'package:owntrack/presentation/screens/regions/regions_screen.dart';
 import 'package:owntrack/presentation/screens/settings/connection_settings_screen.dart';
@@ -109,6 +111,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Widget _buildMapView() {
+    final tiles = ref.watch(mapTilerConfigProvider);
+    if (!tiles.isConfigured) {
+      return _buildUnconfiguredTilesView();
+    }
+
     return Stack(
       children: [
         FlutterMap(
@@ -122,7 +129,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
           children: [
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: tiles.urlTemplate,
               userAgentPackageName: 'com.cf.fivex.owntrack',
               maxZoom: 19,
               tileProvider: NetworkTileProvider(),
@@ -137,6 +144,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
           ],
         ),
+        // Attribution is required: OSM data is ODbL-licensed and MapTiler's
+        // terms require crediting both. Kept permanently visible and bottom
+        // left — flutter_map's RichAttributionWidget collapses behind an "i"
+        // badge in the bottom right, where the publish FAB covers it.
+        Positioned(
+          left: 8,
+          bottom: 8,
+          child: _buildAttributionBar(),
+        ),
         Positioned(
           top: 8,
           left: 8,
@@ -150,6 +166,93 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ),
       ],
     );
+  }
+
+  /// Permanent tile attribution, with both credits individually linked.
+  Widget _buildAttributionBar() {
+    final theme = Theme.of(context);
+    final plain = theme.textTheme.bodySmall;
+    final link = plain?.copyWith(
+      decoration: TextDecoration.underline,
+      color: theme.colorScheme.primary,
+    );
+
+    return Material(
+      key: const Key('map-attribution'),
+      color: theme.colorScheme.surface.withValues(alpha: 0.8),
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('© ', style: plain),
+            InkWell(
+              onTap: () => _openUrl('https://www.maptiler.com/copyright/'),
+              child: Text('MapTiler', style: link),
+            ),
+            Text(' © ', style: plain),
+            InkWell(
+              onTap: () =>
+                  _openUrl('https://www.openstreetmap.org/copyright'),
+              child: Text('OpenStreetMap contributors', style: link),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Shown when no tile key was compiled in.
+  ///
+  /// An unconfigured map states the reason rather than presenting an empty
+  /// grid that looks like a network failure.
+  Widget _buildUnconfiguredTilesView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.map_outlined,
+              size: 80,
+              color: Theme.of(context).colorScheme.primary.withValues(
+                    alpha: 0.5,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Map tiles not configured',
+              style: Theme.of(context).textTheme.headlineSmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Build with --dart-define=${MapTilerConfig.envVarName}=<key> to '
+              'load map tiles.',
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      final launched = await launchUrl(uri);
+      if (launched) return;
+      throw StateError('launchUrl returned false');
+    } catch (e) {
+      AppLogger.e('Could not open $url: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open $url')),
+      );
+    }
   }
 
   Widget _buildAddWaypointChip() {

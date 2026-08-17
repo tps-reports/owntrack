@@ -50,3 +50,6 @@ logs/
 # Gradle build outputs
 android/build/
 android/.gradle/
+
+# Local build secrets (API keys passed via --dart-define-from-file)
+dart_defines.json

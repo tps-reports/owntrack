@@ -55,6 +55,32 @@ flutter pub get
 flutter pub run build_runner build --delete-conflicting-outputs
 ```
 
+### Map tiles (required)
+
+Map tiles come from [MapTiler](https://www.maptiler.com/). The OpenStreetMap
+Foundation's public servers (`tile.openstreetmap.org`) are donation-funded and
+their [tile usage policy](https://operations.osmfoundation.org/policies/tiles)
+forbids distributed applications, so a MapTiler API key is needed.
+
+Get a free key from the MapTiler dashboard and pass it at build time. Flutter
+resolves `String.fromEnvironment` at *compile* time, so a shell variable alone
+is not enough — it must be forwarded as a `--dart-define`:
+
+```bash
+flutter run --dart-define=MAPS_API_KEY=$MAPS_API_KEY
+flutter build web --release --dart-define=MAPS_API_KEY=$MAPS_API_KEY
+```
+
+Or keep it in a git-ignored `dart_defines.json` (see `dart_defines.example.json`):
+
+```bash
+flutter run --dart-define-from-file=dart_defines.json
+```
+
+Without a key the map renders an explanatory placeholder rather than a blank
+grid. Because a client-side tile key ships inside the bundle, restrict it by
+allowed origin in the MapTiler dashboard — it is not a secret once distributed.
+
 ### Testing
 
 ```bash

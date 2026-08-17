@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:owntrack/core/config/map_tiler_config.dart';
 import 'package:owntrack/data/datasources/local/preferences/settings_local_datasource.dart';
 import 'package:owntrack/data/models/friend.dart';
 import 'package:owntrack/data/models/region.dart';
@@ -20,6 +21,17 @@ import 'package:owntrack/data/services/message_processor.dart';
 import 'package:owntrack/data/services/mqtt_service.dart';
 import 'package:owntrack/data/services/permission_service.dart';
 import 'package:owntrack/data/services/tracking_service.dart';
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+/// Map tile configuration, read from the compile-time environment.
+///
+/// Overridden in tests to exercise the configured and unconfigured cases.
+final mapTilerConfigProvider = Provider<MapTilerConfig>((ref) {
+  return MapTilerConfig.fromEnvironment();
+});
 
 // ============================================================================
 // Local Data Sources

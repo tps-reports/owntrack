@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:owntrack/core/config/map_tiler_config.dart';
 import 'package:owntrack/data/datasources/local/preferences/settings_local_datasource.dart';
 import 'package:owntrack/domain/providers/app_providers.dart';
 import 'package:owntrack/presentation/screens/map/map_screen.dart';
@@ -14,6 +15,10 @@ Future<ProviderScope> _scoped(Widget child) async {
     overrides: [
       settingsLocalDataSourceProvider
           .overrideWithValue(SettingsLocalDataSource(prefs)),
+      // Tests run without a --dart-define, so supply a key explicitly;
+      // otherwise the map renders its "tiles not configured" placeholder.
+      mapTilerConfigProvider
+          .overrideWithValue(const MapTilerConfig(apiKey: 'test-key')),
     ],
     child: MaterialApp(home: child),
   );
