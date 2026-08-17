@@ -32,8 +32,31 @@ class MapTilerConfig {
   });
 
   /// Reads the key from the compile-time environment.
-  factory MapTilerConfig.fromEnvironment() =>
-      const MapTilerConfig(apiKey: _envApiKey);
+  ///
+  /// Two sources, in priority order:
+  ///  1. the `MAPS_API_KEY` dart-define;
+  ///  2. the `maps_key` query parameter of the `FIVEX_CONFIG` dart-define —
+  ///     the URL anvil's dev_runner passes from `.anvil`'s
+  ///     `environments.<env>.config_url`, where the key is carried as a
+  ///     `${MAPS_API_KEY}` placeholder expanded from the shell environment
+  ///     at launch time so the tracked file never contains the value.
+  factory MapTilerConfig.fromEnvironment() => MapTilerConfig(
+        apiKey: resolveKey(direct: _envApiKey, fivexConfig: _envFivexConfig),
+      );
+
+  /// Resolution logic for [MapTilerConfig.fromEnvironment], kept pure so
+  /// every branch is unit-testable.
+  static String resolveKey({
+    required String direct,
+    required String fivexConfig,
+  }) {
+    if (direct.trim().isNotEmpty) return direct.trim();
+    if (fivexConfig.trim().isEmpty) return '';
+
+    final uri = Uri.tryParse(fivexConfig.trim());
+    if (uri == null) return '';
+    return uri.queryParameters['maps_key']?.trim() ?? '';
+  }
 
   /// Terrain-oriented style, suited to a location tracker used outdoors.
   static const String defaultStyle = 'outdoor-v2';
@@ -42,6 +65,8 @@ class MapTilerConfig {
   static const String envVarName = 'MAPS_API_KEY';
 
   static const String _envApiKey = String.fromEnvironment(envVarName);
+
+  static const String _envFivexConfig = String.fromEnvironment('FIVEX_CONFIG');
 
   final String apiKey;
   final String style;

@@ -52,4 +52,50 @@ void main() {
       expect(() => config.urlTemplate, throwsStateError);
     });
   });
+
+  group('MapTilerConfig.resolveKey', () {
+    test('a direct MAPS_API_KEY define wins over everything', () {
+      final key = MapTilerConfig.resolveKey(
+        direct: 'direct-key',
+        fivexConfig: 'https://dev.2h2.us?maps_key=anvil-key&env=local',
+      );
+
+      expect(key, 'direct-key');
+    });
+
+    test('falls back to maps_key parsed from FIVEX_CONFIG', () {
+      final key = MapTilerConfig.resolveKey(
+        direct: '',
+        fivexConfig:
+            'https://dev.2h2.us:443?mqtt_host=localhost&maps_key=anvil-key'
+            '&rp_id=dev.2h2.us&env=local',
+      );
+
+      expect(key, 'anvil-key');
+    });
+
+    test('is empty when FIVEX_CONFIG has no maps_key', () {
+      final key = MapTilerConfig.resolveKey(
+        direct: '',
+        fivexConfig: 'https://dev.2h2.us?env=local',
+      );
+
+      expect(key, isEmpty);
+    });
+
+    test('is empty when neither source is set', () {
+      final key = MapTilerConfig.resolveKey(direct: '', fivexConfig: '');
+
+      expect(key, isEmpty);
+    });
+
+    test('tolerates an unparseable FIVEX_CONFIG', () {
+      final key = MapTilerConfig.resolveKey(
+        direct: '',
+        fivexConfig: '::not a url::',
+      );
+
+      expect(key, isEmpty);
+    });
+  });
 }
