@@ -62,7 +62,7 @@ void main() {
       }
     });
 
-    testWidgets('offers manual entry and map selection when tapped',
+    testWidgets('offers manual entry, map selection and management when tapped',
         (tester) async {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
@@ -72,6 +72,20 @@ void main() {
 
       expect(find.text('Enter coordinates'), findsOneWidget);
       expect(find.text('Pick on map'), findsOneWidget);
+      expect(find.text('Manage waypoints'), findsOneWidget);
+    });
+
+    testWidgets('opens the waypoint list from the sheet', (tester) async {
+      await tester.pumpWidget(await _scoped(const MapScreen()));
+      await tester.pump();
+
+      await tester.tap(_addWaypointFab);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Manage waypoints'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WaypointsScreen), findsOneWidget);
+      expect(find.byType(BackButton), findsOneWidget);
     });
 
     testWidgets('opens the coordinate form when manual entry is chosen',

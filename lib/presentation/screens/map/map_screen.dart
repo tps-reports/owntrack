@@ -16,7 +16,9 @@ import 'package:owntrack/presentation/screens/settings/tracking_settings_screen.
 import 'package:owntrack/presentation/screens/waypoints/waypoints_screen.dart';
 
 /// How the user chose to define a new waypoint's coordinates.
-enum _WaypointSource { manual, map }
+/// What the user chose from the waypoint FAB's sheet: define coordinates by
+/// hand, pick them on the map, or open the management list.
+enum _WaypointSheetAction { manual, map, manage }
 
 /// Main map screen showing current location, friends, and regions
 class MapScreen extends ConsumerStatefulWidget {
@@ -524,10 +526,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return markers;
   }
 
-  /// Asks how the user wants to define the waypoint, then routes to either
-  /// manual entry or map placement. Both paths converge on [_saveWaypoint].
+  /// Asks how the user wants to define the waypoint — manual entry or map
+  /// placement, both converging on [_saveWaypoint] — or opens the management
+  /// list, which also lives under Settings > Waypoints.
   Future<void> _startAddWaypoint() async {
-    final choice = await showModalBottomSheet<_WaypointSource>(
+    final choice = await showModalBottomSheet<_WaypointSheetAction>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(
@@ -537,13 +540,20 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               leading: const Icon(Icons.edit_location_alt),
               title: const Text('Enter coordinates'),
               subtitle: const Text('Type latitude and longitude'),
-              onTap: () => Navigator.pop(context, _WaypointSource.manual),
+              onTap: () => Navigator.pop(context, _WaypointSheetAction.manual),
             ),
             ListTile(
               leading: const Icon(Icons.touch_app),
               title: const Text('Pick on map'),
               subtitle: const Text('Tap a spot on the map'),
-              onTap: () => Navigator.pop(context, _WaypointSource.map),
+              onTap: () => Navigator.pop(context, _WaypointSheetAction.map),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.list),
+              title: const Text('Manage waypoints'),
+              subtitle: const Text('View, edit or delete saved waypoints'),
+              onTap: () => Navigator.pop(context, _WaypointSheetAction.manage),
             ),
           ],
         ),
@@ -553,14 +563,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (!mounted || choice == null) return;
 
     switch (choice) {
-      case _WaypointSource.manual:
+      case _WaypointSheetAction.manual:
         final waypoint = await showWaypointFormDialog(context);
         await _saveWaypoint(waypoint);
-      case _WaypointSource.map:
+      case _WaypointSheetAction.map:
         setState(() {
           _placingWaypoint = true;
           _pendingPoint = null;
         });
+      case _WaypointSheetAction.manage:
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const WaypointsScreen()),
+        );
     }
   }
 
