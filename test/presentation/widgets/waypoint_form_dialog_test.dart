@@ -1,14 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:owntrack/data/models/waypoint.dart';
 import 'package:owntrack/presentation/widgets/waypoint_form_dialog.dart';
 
-/// Pumps the dialog and captures whatever it pops.
-Future<Waypoint?> _showDialog(
-  WidgetTester tester, {
-  LatLng? initialPoint,
-}) async {
+const _original = Waypoint(
+  id: 'wp-1',
+  lat: 40.2141,
+  lon: -111.6711,
+  timestamp: 1704110400,
+  description: 'Home',
+  radius: 150,
+);
+
+/// Opens the edit dialog for [_original] and captures whatever it pops.
+Future<Waypoint? Function()> _open(WidgetTester tester) async {
   Waypoint? captured;
   await tester.pumpWidget(
     MaterialApp(
@@ -18,7 +23,7 @@ Future<Waypoint?> _showDialog(
             onPressed: () async {
               captured = await showWaypointFormDialog(
                 context,
-                initialPoint: initialPoint,
+                initialWaypoint: _original,
               );
             },
             child: const Text('open'),
@@ -29,224 +34,79 @@ Future<Waypoint?> _showDialog(
   );
   await tester.tap(find.text('open'));
   await tester.pumpAndSettle();
-  return captured;
+  return () => captured;
 }
 
 void main() {
-  group('WaypointFormDialog', () {
-    testWidgets('prefills coordinates when a point is supplied',
-        (tester) async {
-      await _showDialog(tester,
-          initialPoint: const LatLng(40.2141, -111.6711));
+  group('WaypointFormDialog (edit)', () {
+    testWidgets('prefills every field from the waypoint', (tester) async {
+      await _open(tester);
 
+      expect(find.text('Edit Waypoint'), findsOneWidget);
+      // 'Home' also happens to be the description field's example hint, so
+      // assert on the editable value rather than raw text.
+      final desc = tester.widget<TextFormField>(
+        find.byKey(const Key('waypoint-description-field')),
+      );
+      expect(desc.controller?.text, 'Home');
       expect(find.text('40.2141'), findsOneWidget);
       expect(find.text('-111.6711'), findsOneWidget);
+      expect(find.text('150'), findsOneWidget);
     });
 
-    testWidgets('locks the coordinate fields when a point is supplied',
+    testWidgets('saves edits onto the original, preserving identity',
         (tester) async {
-      await _showDialog(tester,
-          initialPoint: const LatLng(40.2141, -111.6711));
+      final result = await _open(tester);
 
-      final lat = tester.widget<TextFormField>(
-        find.byKey(const Key('waypoint-lat-field')),
-      );
-      final lon = tester.widget<TextFormField>(
-        find.byKey(const Key('waypoint-lon-field')),
-      );
+      await tester.enterText(
+          find.byKey(const Key('waypoint-description-field')), 'Office');
+      await tester.enterText(
+          find.byKey(const Key('waypoint-lat-field')), '40.25');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
 
-      expect(lat.enabled, isFalse);
-      expect(lon.enabled, isFalse);
+      final captured = result();
+      expect(captured, isNotNull);
+      expect(captured!.description, 'Office');
+      expect(captured.lat, closeTo(40.25, 1e-9));
+      // Identity and history survive the edit.
+      expect(captured.id, 'wp-1');
+      expect(captured.timestamp, 1704110400);
     });
 
-    testWidgets('leaves the coordinate fields editable for manual entry',
-        (tester) async {
-      await _showDialog(tester);
-
-      final lat = tester.widget<TextFormField>(
-        find.byKey(const Key('waypoint-lat-field')),
-      );
-
-      expect(lat.enabled, isTrue);
-    });
-
-    testWidgets('rejects a latitude outside -90..90 instead of discarding it',
-        (tester) async {
-      await _showDialog(tester);
+    testWidgets('rejects an out-of-range latitude instead of discarding the '
+        'edit', (tester) async {
+      await _open(tester);
 
       await tester.enterText(
           find.byKey(const Key('waypoint-lat-field')), '91');
-      await tester.enterText(
-          find.byKey(const Key('waypoint-lon-field')), '-111.6711');
-      await tester.tap(find.text('Add'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(find.text('Latitude must be between -90 and 90'), findsOneWidget);
-      // Dialog stays open rather than silently dropping the waypoint.
-      expect(find.text('Add Waypoint'), findsOneWidget);
+      // Dialog stays open rather than silently dropping the edit.
+      expect(find.text('Edit Waypoint'), findsOneWidget);
     });
 
-    testWidgets('rejects a longitude outside -180..180', (tester) async {
-      await _showDialog(tester);
+    testWidgets('rejects a non-numeric longitude', (tester) async {
+      await _open(tester);
 
       await tester.enterText(
-          find.byKey(const Key('waypoint-lat-field')), '40.2141');
-      await tester.enterText(
-          find.byKey(const Key('waypoint-lon-field')), '181');
-      await tester.tap(find.text('Add'));
-      await tester.pumpAndSettle();
-
-      expect(
-          find.text('Longitude must be between -180 and 180'), findsOneWidget);
-    });
-
-    testWidgets('rejects a non-numeric latitude', (tester) async {
-      await _showDialog(tester);
-
-      await tester.enterText(
-          find.byKey(const Key('waypoint-lat-field')), 'abc');
-      await tester.enterText(
-          find.byKey(const Key('waypoint-lon-field')), '-111.6711');
-      await tester.tap(find.text('Add'));
+          find.byKey(const Key('waypoint-lon-field')), 'abc');
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(find.text('Enter a valid number'), findsOneWidget);
     });
 
-    testWidgets('returns a waypoint built from the entered values',
-        (tester) async {
-      Waypoint? captured;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: ElevatedButton(
-                onPressed: () async {
-                  captured = await showWaypointFormDialog(context);
-                },
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-
-      await tester.enterText(
-          find.byKey(const Key('waypoint-description-field')), 'Home');
-      await tester.enterText(
-          find.byKey(const Key('waypoint-lat-field')), '40.2141');
-      await tester.enterText(
-          find.byKey(const Key('waypoint-lon-field')), '-111.6711');
-      await tester.enterText(
-          find.byKey(const Key('waypoint-radius-field')), '250');
-      await tester.tap(find.text('Add'));
-      await tester.pumpAndSettle();
-
-      expect(captured, isNotNull);
-      expect(captured!.description, 'Home');
-      expect(captured!.lat, closeTo(40.2141, 1e-9));
-      expect(captured!.lon, closeTo(-111.6711, 1e-9));
-      expect(captured!.radius, closeTo(250, 1e-9));
-      expect(captured!.id, isNotEmpty);
-    });
-
-    testWidgets('edit mode prefills every field and saves onto the original',
-        (tester) async {
-      const original = Waypoint(
-        id: 'wp-1',
-        lat: 40.2141,
-        lon: -111.6711,
-        timestamp: 1704110400,
-        description: 'Home',
-        radius: 150,
-      );
-
-      Waypoint? captured;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: ElevatedButton(
-                onPressed: () async {
-                  captured = await showWaypointFormDialog(
-                    context,
-                    initialWaypoint: original,
-                  );
-                },
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Edit Waypoint'), findsOneWidget);
-      // 'Home' also happens to be the description field's example hint, so
-      // assert on the editable value rather than raw text.
-      final descField = tester.widget<TextFormField>(
-        find.byKey(const Key('waypoint-description-field')),
-      );
-      expect(descField.controller?.text, 'Home');
-      expect(find.text('40.2141'), findsOneWidget);
-      expect(find.text('-111.6711'), findsOneWidget);
-      expect(find.text('150'), findsOneWidget);
-
-      await tester.enterText(
-          find.byKey(const Key('waypoint-description-field')), 'Office');
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-
-      expect(captured, isNotNull);
-      expect(captured!.description, 'Office');
-      // Identity and history survive the edit.
-      expect(captured!.id, 'wp-1');
-      expect(captured!.timestamp, 1704110400);
-      expect(captured!.lat, closeTo(40.2141, 1e-9));
-    });
-
-    testWidgets('edit mode keeps the coordinates editable', (tester) async {
-      const original = Waypoint(
-        id: 'wp-1',
-        lat: 40.2141,
-        lon: -111.6711,
-        timestamp: 1704110400,
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: ElevatedButton(
-                onPressed: () =>
-                    showWaypointFormDialog(context, initialWaypoint: original),
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-
-      final lat = tester.widget<TextFormField>(
-        find.byKey(const Key('waypoint-lat-field')),
-      );
-      expect(lat.enabled, isTrue);
-    });
-
     testWidgets('returns null when cancelled', (tester) async {
-      final result = await _showDialog(tester);
-      // _showDialog captures before the user acts; drive cancel explicitly.
-      expect(result, isNull);
+      final result = await _open(tester);
 
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Add Waypoint'), findsNothing);
+      expect(result(), isNull);
+      expect(find.text('Edit Waypoint'), findsNothing);
     });
   });
 }

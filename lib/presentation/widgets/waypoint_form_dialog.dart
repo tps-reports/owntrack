@@ -1,46 +1,34 @@
-import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:owntrack/data/models/waypoint.dart';
+import 'package:owntrack/presentation/widgets/waypoint_field_validators.dart';
 
-/// Shows the waypoint form and returns the described waypoint.
+/// Shows the edit form for [waypoint] and returns the edited copy.
 ///
-/// Returns null when the user cancels. Three modes:
-///  * no arguments — create, user types the coordinates;
-///  * [initialPoint] — create from a map selection, coordinates locked;
-///  * [initialWaypoint] — edit: every field prefilled and editable, and the
-///    result carries the original's id and timestamp via `copyWith`.
+/// Returns null when the user cancels. Every field is pre-filled and
+/// editable; submitting preserves the waypoint's id and timestamp via
+/// `copyWith`. Creation happens on the map via `AddWaypointPanel` — this
+/// dialog only edits.
 Future<Waypoint?> showWaypointFormDialog(
   BuildContext context, {
-  LatLng? initialPoint,
-  Waypoint? initialWaypoint,
+  required Waypoint initialWaypoint,
 }) {
-  assert(
-    initialPoint == null || initialWaypoint == null,
-    'A waypoint is either placed from the map or edited, not both.',
-  );
   return showDialog<Waypoint>(
     context: context,
-    builder: (context) => WaypointFormDialog(
-      initialPoint: initialPoint,
-      initialWaypoint: initialWaypoint,
-    ),
+    builder: (context) => WaypointFormDialog(initialWaypoint: initialWaypoint),
   );
 }
 
-/// Dialog that collects the fields needed to build a [Waypoint].
+/// Dialog that edits a [Waypoint].
 ///
 /// Validation runs before the dialog closes, so invalid coordinates surface an
-/// inline error instead of being silently discarded.
+/// inline error instead of being silently discarded. Controllers are owned by
+/// this State and disposed with the route, so the dialog's exit animation
+/// never touches a disposed controller.
 class WaypointFormDialog extends StatefulWidget {
-  const WaypointFormDialog({super.key, this.initialPoint, this.initialWaypoint});
+  const WaypointFormDialog({super.key, required this.initialWaypoint});
 
-  /// Coordinates chosen on the map. When set, the coordinate fields are
-  /// pre-filled and locked.
-  final LatLng? initialPoint;
-
-  /// Waypoint being edited. When set, every field is pre-filled and editable,
-  /// and submitting preserves the waypoint's id and timestamp.
-  final Waypoint? initialWaypoint;
+  /// Waypoint being edited.
+  final Waypoint initialWaypoint;
 
   @override
   State<WaypointFormDialog> createState() => _WaypointFormDialogState();
@@ -54,27 +42,15 @@ class _WaypointFormDialogState extends State<WaypointFormDialog> {
   late final TextEditingController _lonController;
   late final TextEditingController _radiusController;
 
-  bool get _fromMap => widget.initialPoint != null;
-  bool get _isEdit => widget.initialWaypoint != null;
-
   @override
   void initState() {
     super.initState();
     final editing = widget.initialWaypoint;
-    _descController = TextEditingController(text: editing?.description ?? '');
-    _latController = TextEditingController(
-      text: editing?.lat.toString() ??
-          widget.initialPoint?.latitude.toString() ??
-          '',
-    );
-    _lonController = TextEditingController(
-      text: editing?.lon.toString() ??
-          widget.initialPoint?.longitude.toString() ??
-          '',
-    );
-    _radiusController = TextEditingController(
-      text: editing != null ? _formatRadius(editing.radius) : '100',
-    );
+    _descController = TextEditingController(text: editing.description);
+    _latController = TextEditingController(text: editing.lat.toString());
+    _lonController = TextEditingController(text: editing.lon.toString());
+    _radiusController =
+        TextEditingController(text: _formatRadius(editing.radius));
   }
 
   /// "150" rather than "150.0" for whole-number radii.
@@ -91,66 +67,24 @@ class _WaypointFormDialogState extends State<WaypointFormDialog> {
     super.dispose();
   }
 
-  String? _validateCoordinate(
-    String? value, {
-    required double max,
-    required String rangeMessage,
-  }) {
-    final text = value?.trim() ?? '';
-    if (text.isEmpty) return 'Required';
-
-    final parsed = double.tryParse(text);
-    if (parsed == null) return 'Enter a valid number';
-    if (parsed < -max || parsed > max) return rangeMessage;
-    return null;
-  }
-
-  String? _validateRadius(String? value) {
-    final text = value?.trim() ?? '';
-    if (text.isEmpty) return null; // falls back to the default below
-
-    final parsed = double.tryParse(text);
-    if (parsed == null) return 'Enter a valid number';
-    if (parsed <= 0) return 'Radius must be greater than 0';
-    return null;
-  }
-
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    final lat = double.parse(_latController.text.trim());
-    final lon = double.parse(_lonController.text.trim());
-    final description = _descController.text.trim();
-    final radius = double.tryParse(_radiusController.text.trim()) ?? 100;
-
-    final editing = widget.initialWaypoint;
-    final Waypoint waypoint;
-    if (editing != null) {
-      waypoint = editing.copyWith(
-        lat: lat,
-        lon: lon,
-        description: description,
-        radius: radius,
-      );
-    } else {
-      final now = DateTime.now();
-      waypoint = Waypoint(
-        id: now.millisecondsSinceEpoch.toString(),
-        lat: lat,
-        lon: lon,
-        timestamp: now.millisecondsSinceEpoch ~/ 1000,
-        description: description,
-        radius: radius,
-      );
-    }
-
-    Navigator.pop(context, waypoint);
+    Navigator.pop(
+      context,
+      widget.initialWaypoint.copyWith(
+        lat: double.parse(_latController.text.trim()),
+        lon: double.parse(_lonController.text.trim()),
+        description: _descController.text.trim(),
+        radius: double.tryParse(_radiusController.text.trim()) ?? 100,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_isEdit ? 'Edit Waypoint' : 'Add Waypoint'),
+      title: const Text('Edit Waypoint'),
       content: SingleChildScrollView(
         child: Form(
           key: _formKey,
@@ -170,41 +104,29 @@ class _WaypointFormDialogState extends State<WaypointFormDialog> {
               TextFormField(
                 key: const Key('waypoint-lat-field'),
                 controller: _latController,
-                enabled: !_fromMap,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Latitude',
                   hintText: '37.7749',
-                  helperText: _fromMap ? 'Selected on map' : null,
                 ),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                   signed: true,
                 ),
-                validator: (v) => _validateCoordinate(
-                  v,
-                  max: 90,
-                  rangeMessage: 'Latitude must be between -90 and 90',
-                ),
+                validator: validateLatitude,
               ),
               const SizedBox(height: 16),
               TextFormField(
                 key: const Key('waypoint-lon-field'),
                 controller: _lonController,
-                enabled: !_fromMap,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Longitude',
                   hintText: '-122.4194',
-                  helperText: _fromMap ? 'Selected on map' : null,
                 ),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                   signed: true,
                 ),
-                validator: (v) => _validateCoordinate(
-                  v,
-                  max: 180,
-                  rangeMessage: 'Longitude must be between -180 and 180',
-                ),
+                validator: validateLongitude,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -215,7 +137,7 @@ class _WaypointFormDialogState extends State<WaypointFormDialog> {
                   hintText: '100',
                 ),
                 keyboardType: TextInputType.number,
-                validator: _validateRadius,
+                validator: validateRadius,
               ),
             ],
           ),
@@ -228,7 +150,7 @@ class _WaypointFormDialogState extends State<WaypointFormDialog> {
         ),
         FilledButton(
           onPressed: _submit,
-          child: Text(_isEdit ? 'Save' : 'Add'),
+          child: const Text('Save'),
         ),
       ],
     );

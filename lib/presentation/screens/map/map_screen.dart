@@ -6,19 +6,14 @@ import 'package:owntrack/core/config/map_tiler_config.dart';
 import 'package:owntrack/core/utils/app_logger.dart';
 import 'package:owntrack/data/models/waypoint.dart';
 import 'package:owntrack/domain/providers/app_providers.dart';
-import 'package:owntrack/presentation/widgets/waypoint_form_dialog.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:owntrack/presentation/screens/contacts/contacts_screen.dart';
+import 'package:owntrack/presentation/widgets/add_waypoint_panel.dart';
 import 'package:owntrack/presentation/screens/regions/regions_screen.dart';
 import 'package:owntrack/presentation/screens/settings/connection_settings_screen.dart';
 import 'package:owntrack/presentation/screens/settings/identification_settings_screen.dart';
 import 'package:owntrack/presentation/screens/settings/tracking_settings_screen.dart';
 import 'package:owntrack/presentation/screens/waypoints/waypoints_screen.dart';
-
-/// How the user chose to define a new waypoint's coordinates.
-/// What the user chose from the waypoint FAB's sheet: define coordinates by
-/// hand, pick them on the map, or open the management list.
-enum _WaypointSheetAction { manual, map, manage }
 
 /// Main map screen showing current location, friends, and regions
 class MapScreen extends ConsumerStatefulWidget {
@@ -34,11 +29,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   // Default location (San Francisco)
   static const LatLng _defaultLocation = LatLng(37.7749, -122.4194);
 
-  /// True while the user is picking a waypoint location on the map.
-  bool _placingWaypoint = false;
+  /// True while the add-waypoint form panel is open over the map.
+  bool _addingWaypoint = false;
 
-  /// The point tapped during placement, before it is confirmed.
-  LatLng? _pendingPoint;
+  /// Latest point tapped on the map while the form is open.
+  LatLng? _tappedPoint;
 
   @override
   Widget build(BuildContext context) {
@@ -89,8 +84,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   /// The map tab's action buttons, stacked lower right.
   ///
-  /// The add-waypoint FAB is withheld while a placement is in progress — the
-  /// hint bar at the top of the map drives that flow.
+  /// Both are withheld while the add-waypoint panel is open — its Save and
+  /// Cancel buttons are the actions in that state.
   Widget _buildMapFabs() {
     final tilesConfigured = ref.watch(mapTilerConfigProvider).isConfigured;
 
@@ -98,7 +93,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        if (tilesConfigured && !_placingWaypoint) ...[
+        if (tilesConfigured) ...[
           FloatingActionButton.small(
             heroTag: 'add-waypoint-fab',
             onPressed: _startAddWaypoint,
@@ -145,7 +140,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             initialZoom: 13.0,
             minZoom: 3.0,
             maxZoom: 19.0,
-            onTap: _placingWaypoint ? (_, point) => _onMapTapped(point) : null,
+            onTap: _addingWaypoint ? (_, point) => _onMapTapped(point) : null,
           ),
           children: [
             TileLayer(
@@ -173,12 +168,22 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           bottom: 8,
           child: _buildAttributionBar(),
         ),
-        if (_placingWaypoint)
+        if (_addingWaypoint)
           Positioned(
-            top: 8,
             left: 8,
             right: 8,
-            child: _buildPlacementBar(),
+            bottom: 8,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: AddWaypointPanel(
+                  point: _tappedPoint,
+                  onSave: _saveNewWaypoint,
+                  onCancel: _closeAddWaypoint,
+                ),
+              ),
+            ),
           ),
       ],
     );
@@ -269,41 +274,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         SnackBar(content: Text('Could not open $url')),
       );
     }
-  }
-
-  /// Hint bar shown while the user is choosing a point on the map.
-  Widget _buildPlacementBar() {
-    final hasPoint = _pendingPoint != null;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          children: [
-            const Icon(Icons.touch_app, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                hasPoint
-                    ? 'Tap again to move, or confirm'
-                    : 'Tap the map to place the waypoint',
-              ),
-            ),
-            TextButton(
-              key: const Key('waypoint-placement-cancel'),
-              onPressed: _cancelPlacement,
-              child: const Text('Cancel'),
-            ),
-            const SizedBox(width: 4),
-            FilledButton(
-              key: const Key('waypoint-placement-confirm'),
-              onPressed: hasPoint ? _confirmPlacement : null,
-              child: const Text('Confirm'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildContactsView() {
@@ -435,8 +405,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   List<Marker> _buildMarkers() {
     final markers = <Marker>[];
 
-    // Crosshair for the point being placed, before it is confirmed
-    final pending = _pendingPoint;
+    // Crosshair for the point tapped while the add-waypoint form is open
+    final pending = _tappedPoint;
     if (pending != null) {
       markers.add(
         Marker(
@@ -526,78 +496,26 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return markers;
   }
 
-  /// Asks how the user wants to define the waypoint — manual entry or map
-  /// placement, both converging on [_saveWaypoint] — or opens the management
-  /// list, which also lives under Settings > Waypoints.
-  Future<void> _startAddWaypoint() async {
-    final choice = await showModalBottomSheet<_WaypointSheetAction>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_location_alt),
-              title: const Text('Enter coordinates'),
-              subtitle: const Text('Type latitude and longitude'),
-              onTap: () => Navigator.pop(context, _WaypointSheetAction.manual),
-            ),
-            ListTile(
-              leading: const Icon(Icons.touch_app),
-              title: const Text('Pick on map'),
-              subtitle: const Text('Tap a spot on the map'),
-              onTap: () => Navigator.pop(context, _WaypointSheetAction.map),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.list),
-              title: const Text('Manage waypoints'),
-              subtitle: const Text('View, edit or delete saved waypoints'),
-              onTap: () => Navigator.pop(context, _WaypointSheetAction.manage),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (!mounted || choice == null) return;
-
-    switch (choice) {
-      case _WaypointSheetAction.manual:
-        final waypoint = await showWaypointFormDialog(context);
-        await _saveWaypoint(waypoint);
-      case _WaypointSheetAction.map:
-        setState(() {
-          _placingWaypoint = true;
-          _pendingPoint = null;
-        });
-      case _WaypointSheetAction.manage:
-        await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const WaypointsScreen()),
-        );
-    }
-  }
-
-  void _onMapTapped(LatLng point) {
-    setState(() => _pendingPoint = point);
-  }
-
-  void _cancelPlacement() {
+  void _startAddWaypoint() {
     setState(() {
-      _placingWaypoint = false;
-      _pendingPoint = null;
+      _addingWaypoint = true;
+      _tappedPoint = null;
     });
   }
 
-  Future<void> _confirmPlacement() async {
-    final point = _pendingPoint;
-    if (point == null) return;
+  void _onMapTapped(LatLng point) {
+    setState(() => _tappedPoint = point);
+  }
 
-    final waypoint = await showWaypointFormDialog(context, initialPoint: point);
-    if (!mounted) return;
+  void _closeAddWaypoint() {
+    setState(() {
+      _addingWaypoint = false;
+      _tappedPoint = null;
+    });
+  }
 
-    _cancelPlacement();
+  Future<void> _saveNewWaypoint(Waypoint waypoint) async {
+    _closeAddWaypoint();
     await _saveWaypoint(waypoint);
   }
 

@@ -1,3 +1,4 @@
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -27,7 +28,7 @@ Future<ProviderScope> _scoped(Widget child) async {
 final _addWaypointFab = find.byTooltip('Add waypoint');
 
 void main() {
-  group('Map screen add-waypoint entry point', () {
+  group('Map screen add-waypoint flow', () {
     testWidgets('shows an Add waypoint FAB alongside the publish FAB',
         (tester) async {
       await tester.pumpWidget(await _scoped(const MapScreen()));
@@ -35,34 +36,27 @@ void main() {
 
       expect(_addWaypointFab, findsOneWidget);
       expect(find.byTooltip('Publish location'), findsOneWidget);
-      expect(
-        find.ancestor(
-          of: _addWaypointFab,
-          matching: find.byType(FloatingActionButton),
-        ),
-        findsOneWidget,
-      );
     });
 
-    testWidgets('places both FABs in the lower-right quadrant',
-        (tester) async {
+    testWidgets('opens the form directly — no chooser sheet', (tester) async {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
 
-      final screen = tester.getSize(find.byType(MaterialApp));
-      for (final finder in [
-        _addWaypointFab,
-        find.byTooltip('Publish location'),
-      ]) {
-        final center = tester.getCenter(finder);
-        expect(center.dx, greaterThan(screen.width / 2),
-            reason: 'FAB should sit right of centre');
-        expect(center.dy, greaterThan(screen.height / 2),
-            reason: 'FAB should sit below centre');
-      }
+      await tester.tap(_addWaypointFab);
+      await tester.pumpAndSettle();
+
+      // Straight to the form.
+      expect(find.byKey(const Key('waypoint-lat-field')), findsOneWidget);
+      expect(find.byKey(const Key('waypoint-description-field')),
+          findsOneWidget);
+      // The old intermediaries are gone.
+      expect(find.text('Enter coordinates'), findsNothing);
+      expect(find.text('Pick on map'), findsNothing);
+      expect(find.text('Manage waypoints'), findsNothing);
+      expect(find.text('Tap the map to place the waypoint'), findsNothing);
     });
 
-    testWidgets('offers manual entry, map selection and management when tapped',
+    testWidgets('a map tap fills the coordinate fields while the form is open',
         (tester) async {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
@@ -70,67 +64,129 @@ void main() {
       await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
 
-      expect(find.text('Enter coordinates'), findsOneWidget);
-      expect(find.text('Pick on map'), findsOneWidget);
-      expect(find.text('Manage waypoints'), findsOneWidget);
-    });
-
-    testWidgets('opens the waypoint list from the sheet', (tester) async {
-      await tester.pumpWidget(await _scoped(const MapScreen()));
-      await tester.pump();
-
-      await tester.tap(_addWaypointFab);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Manage waypoints'));
+      // Tap the visible map above the form panel. The map is centred on San
+      // Francisco (37.7749, -122.4194), so a tap near the centre must land in
+      // that neighbourhood.
+      final mapRect = tester.getRect(find.byType(FlutterMap));
+      await tester.tapAt(mapRect.center.translate(0, -150));
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
 
-      expect(find.byType(WaypointsScreen), findsOneWidget);
-      expect(find.byType(BackButton), findsOneWidget);
+      final lat = tester
+          .widget<TextFormField>(find.byKey(const Key('waypoint-lat-field')))
+          .controller!
+          .text;
+      final lon = tester
+          .widget<TextFormField>(find.byKey(const Key('waypoint-lon-field')))
+          .controller!
+          .text;
+      expect(double.tryParse(lat), isNotNull);
+      expect(double.parse(lat), closeTo(37.77, 0.3));
+      expect(double.parse(lon), closeTo(-122.42, 0.3));
     });
 
-    testWidgets('opens the coordinate form when manual entry is chosen',
+    testWidgets('a second map tap replaces the previous coordinates',
         (tester) async {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
 
       await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Enter coordinates'));
+
+      final mapRect = tester.getRect(find.byType(FlutterMap));
+      await tester.tapAt(mapRect.center.translate(0, -150));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      final firstLat = tester
+          .widget<TextFormField>(find.byKey(const Key('waypoint-lat-field')))
+          .controller!
+          .text;
+
+      await tester.tapAt(mapRect.center.translate(60, -190));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      final secondLat = tester
+          .widget<TextFormField>(find.byKey(const Key('waypoint-lat-field')))
+          .controller!
+          .text;
+
+      expect(secondLat, isNot(equals(firstLat)));
+    });
+
+    testWidgets('Save persists the waypoint and closes the form',
+        (tester) async {
+      late WidgetRef capturedRef;
+      await tester.pumpWidget(await _scoped(Consumer(
+        builder: (context, ref, _) {
+          capturedRef = ref;
+          return const MapScreen();
+        },
+      )));
+      await tester.pump();
+
+      await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
 
-      expect(find.text('Add Waypoint'), findsOneWidget);
+      await tester.enterText(
+          find.byKey(const Key('waypoint-description-field')), 'Trailhead');
+      await tester.enterText(
+          find.byKey(const Key('waypoint-lat-field')), '40.2141');
+      await tester.enterText(
+          find.byKey(const Key('waypoint-lon-field')), '-111.6711');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Waypoint added'), findsOneWidget);
+      expect(find.byKey(const Key('waypoint-lat-field')), findsNothing);
+
+      final saved =
+          capturedRef.read(waypointsRepositoryProvider).getAllWaypoints();
+      expect(saved, hasLength(1));
+      expect(saved.single.description, 'Trailhead');
+      expect(saved.single.lat, closeTo(40.2141, 1e-9));
+    });
+
+    testWidgets('invalid coordinates block Save with an inline message',
+        (tester) async {
+      await tester.pumpWidget(await _scoped(const MapScreen()));
+      await tester.pump();
+
+      await tester.tap(_addWaypointFab);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.byKey(const Key('waypoint-lat-field')), '91');
+      await tester.enterText(
+          find.byKey(const Key('waypoint-lon-field')), '-111.6711');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Latitude must be between -90 and 90'), findsOneWidget);
+      // Form stays open; nothing saved.
       expect(find.byKey(const Key('waypoint-lat-field')), findsOneWidget);
     });
 
-    testWidgets('enters placement mode when map selection is chosen',
-        (tester) async {
-      await tester.pumpWidget(await _scoped(const MapScreen()));
+    testWidgets('Cancel closes the form without saving', (tester) async {
+      late WidgetRef capturedRef;
+      await tester.pumpWidget(await _scoped(Consumer(
+        builder: (context, ref, _) {
+          capturedRef = ref;
+          return const MapScreen();
+        },
+      )));
       await tester.pump();
 
       await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Pick on map'));
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Tap the map to place the waypoint'), findsOneWidget);
-      // The add FAB is withheld while placing; the hint bar drives the flow.
-      expect(_addWaypointFab, findsNothing);
-    });
-
-    testWidgets('leaves placement mode when cancelled', (tester) async {
-      await tester.pumpWidget(await _scoped(const MapScreen()));
-      await tester.pump();
-
-      await tester.tap(_addWaypointFab);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Pick on map'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('waypoint-placement-cancel')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Tap the map to place the waypoint'), findsNothing);
+      expect(find.byKey(const Key('waypoint-lat-field')), findsNothing);
       expect(_addWaypointFab, findsOneWidget);
+      expect(
+        capturedRef.read(waypointsRepositoryProvider).getAllWaypoints(),
+        isEmpty,
+      );
     });
   });
 
@@ -167,7 +223,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(WaypointsScreen), findsOneWidget);
-      // Pushed as a route, so it must carry its own back affordance.
       expect(find.byType(BackButton), findsOneWidget);
     });
   });
