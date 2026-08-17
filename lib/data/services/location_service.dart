@@ -77,11 +77,7 @@ class LocationService {
         return null;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
+      final position = await _getPositionRetryingAuthorizationRace();
 
       _lastPosition = position;
       final update = _positionToLocationUpdate(position);
@@ -90,6 +86,45 @@ class LocationService {
     } catch (e) {
       AppLogger.e('Error getting current location: $e');
       return null;
+    }
+  }
+
+  /// Reads the current position, retrying the authorization race.
+  ///
+  /// On macOS the plugin gates every position read on
+  /// `CLLocationManager.authorizationStatus`, which can still report the old
+  /// status for a moment after the user clicks Allow in the permission
+  /// dialog: `requestPermission()` resolves granted, yet the immediately
+  /// following read throws [PermissionDeniedException]. Observed sequence:
+  /// check=denied → request=always → read throws "User denied permissions",
+  /// while the same read succeeds moments later.
+  ///
+  /// Retry only while a fresh [checkPermission] still reports granted — a
+  /// genuine denial fails that check and is rethrown immediately. Bounded so
+  /// a plugin that keeps refusing cannot loop forever.
+  Future<Position> _getPositionRetryingAuthorizationRace() async {
+    const maxAttempts = 3;
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
+        );
+      } on PermissionDeniedException {
+        if (attempt >= maxAttempts) rethrow;
+
+        final settled = await checkPermission();
+        final granted = settled == LocationPermission.always ||
+            settled == LocationPermission.whileInUse;
+        if (!granted) rethrow;
+
+        AppLogger.w(
+          'Position read denied while permission reports granted '
+          '(authorization race); retrying ($attempt/$maxAttempts)',
+        );
+        await Future<void>.delayed(Duration(milliseconds: 150 * attempt));
+      }
     }
   }
 

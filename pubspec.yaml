@@ -79,6 +79,7 @@ dev_dependencies:
 
   # Testing
   mocktail: ^1.0.4
+  plugin_platform_interface: ^2.1.8
   integration_test:
     sdk: flutter
 
