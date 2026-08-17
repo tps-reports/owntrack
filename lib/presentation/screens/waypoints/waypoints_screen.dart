@@ -1,7 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:owntrack/core/utils/app_logger.dart';
 import 'package:owntrack/data/models/waypoint.dart';
 import 'package:owntrack/domain/providers/app_providers.dart';
+import 'package:owntrack/presentation/widgets/waypoint_form_dialog.dart';
 
 /// Waypoints management screen for viewing and managing waypoints
 class WaypointsScreen extends ConsumerWidget {
@@ -172,93 +174,24 @@ class WaypointsScreen extends ConsumerWidget {
     WidgetRef ref,
     Waypoint waypoint,
   ) async {
-    final descController = TextEditingController(text: waypoint.description);
-    final latController = TextEditingController(text: waypoint.lat.toString());
-    final lonController = TextEditingController(text: waypoint.lon.toString());
-    final radiusController =
-        TextEditingController(text: waypoint.radius.toInt().toString());
+    final updated =
+        await showWaypointFormDialog(context, initialWaypoint: waypoint);
+    if (updated == null || !context.mounted) return;
 
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Waypoint'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: descController,
-                decoration: const InputDecoration(labelText: 'Description'),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: latController,
-                decoration: const InputDecoration(labelText: 'Latitude'),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: lonController,
-                decoration: const InputDecoration(labelText: 'Longitude'),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: radiusController,
-                decoration: const InputDecoration(labelText: 'Radius (meters)'),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true && context.mounted) {
-      final lat = double.tryParse(latController.text);
-      final lon = double.tryParse(lonController.text);
-      final radius = double.tryParse(radiusController.text) ?? 100;
-
-      if (lat != null && lon != null) {
-        final updated = waypoint.copyWith(
-          description: descController.text,
-          lat: lat,
-          lon: lon,
-          radius: radius,
-        );
-
-        final repository = ref.read(waypointsRepositoryProvider);
-        await repository.updateWaypoint(updated);
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Waypoint updated')),
-          );
-        }
-      }
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(waypointsRepositoryProvider).updateWaypoint(updated);
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Waypoint updated')),
+      );
+    } catch (e) {
+      AppLogger.e('Failed to update waypoint: $e');
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not update waypoint: $e')),
+      );
     }
-
-    descController.dispose();
-    latController.dispose();
-    lonController.dispose();
-    radiusController.dispose();
   }
 
   Future<void> _deleteWaypoint(

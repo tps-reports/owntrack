@@ -152,6 +152,92 @@ void main() {
       expect(captured!.id, isNotEmpty);
     });
 
+    testWidgets('edit mode prefills every field and saves onto the original',
+        (tester) async {
+      const original = Waypoint(
+        id: 'wp-1',
+        lat: 40.2141,
+        lon: -111.6711,
+        timestamp: 1704110400,
+        description: 'Home',
+        radius: 150,
+      );
+
+      Waypoint? captured;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () async {
+                  captured = await showWaypointFormDialog(
+                    context,
+                    initialWaypoint: original,
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Waypoint'), findsOneWidget);
+      // 'Home' also happens to be the description field's example hint, so
+      // assert on the editable value rather than raw text.
+      final descField = tester.widget<TextFormField>(
+        find.byKey(const Key('waypoint-description-field')),
+      );
+      expect(descField.controller?.text, 'Home');
+      expect(find.text('40.2141'), findsOneWidget);
+      expect(find.text('-111.6711'), findsOneWidget);
+      expect(find.text('150'), findsOneWidget);
+
+      await tester.enterText(
+          find.byKey(const Key('waypoint-description-field')), 'Office');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(captured, isNotNull);
+      expect(captured!.description, 'Office');
+      // Identity and history survive the edit.
+      expect(captured!.id, 'wp-1');
+      expect(captured!.timestamp, 1704110400);
+      expect(captured!.lat, closeTo(40.2141, 1e-9));
+    });
+
+    testWidgets('edit mode keeps the coordinates editable', (tester) async {
+      const original = Waypoint(
+        id: 'wp-1',
+        lat: 40.2141,
+        lon: -111.6711,
+        timestamp: 1704110400,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () =>
+                    showWaypointFormDialog(context, initialWaypoint: original),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      final lat = tester.widget<TextFormField>(
+        find.byKey(const Key('waypoint-lat-field')),
+      );
+      expect(lat.enabled, isTrue);
+    });
+
     testWidgets('returns null when cancelled', (tester) async {
       final result = await _showDialog(tester);
       // _showDialog captures before the user acts; drive cancel explicitly.

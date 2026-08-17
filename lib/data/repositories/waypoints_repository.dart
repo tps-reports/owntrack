@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:owntrack/core/utils/app_logger.dart';
 import 'package:owntrack/data/datasources/local/preferences/settings_local_datasource.dart';
 import 'package:owntrack/data/models/waypoint.dart';
 
@@ -10,9 +12,18 @@ class WaypointsRepository {
   final SettingsLocalDataSource _localDataSource;
   final Map<String, Waypoint> _waypoints = {};
 
+  final StreamController<void> _changeController =
+      StreamController<void>.broadcast();
+
   WaypointsRepository(this._localDataSource) {
     _loadWaypoints();
   }
+
+  /// Emits after every successful mutation (add, update, delete, clear).
+  ///
+  /// Watchers rebuild their view of [getAllWaypoints] on each event; without
+  /// this, a one-shot read keeps rendering deleted or stale waypoints.
+  Stream<void> get changes => _changeController.stream;
 
   /// Load waypoints from storage
   void _loadWaypoints() {
@@ -25,7 +36,7 @@ class WaypointsRepository {
           _waypoints[waypoint.id] = waypoint;
         }
       } catch (e) {
-        // Handle parsing errors
+        AppLogger.e('Failed to parse stored waypoints: $e');
       }
     }
   }
@@ -47,6 +58,7 @@ class WaypointsRepository {
   Future<void> addWaypoint(Waypoint waypoint) async {
     _waypoints[waypoint.id] = waypoint;
     await _saveWaypoints();
+    _changeController.add(null);
   }
 
   /// Update waypoint
@@ -54,6 +66,7 @@ class WaypointsRepository {
     if (_waypoints.containsKey(waypoint.id)) {
       _waypoints[waypoint.id] = waypoint;
       await _saveWaypoints();
+      _changeController.add(null);
     }
   }
 
@@ -61,6 +74,7 @@ class WaypointsRepository {
   Future<void> deleteWaypoint(String id) async {
     if (_waypoints.remove(id) != null) {
       await _saveWaypoints();
+      _changeController.add(null);
     }
   }
 
@@ -68,8 +82,14 @@ class WaypointsRepository {
   Future<void> clearAll() async {
     _waypoints.clear();
     await _saveWaypoints();
+    _changeController.add(null);
   }
 
   /// Get number of waypoints
   int get count => _waypoints.length;
+
+  /// Release the change stream.
+  void dispose() {
+    _changeController.close();
+  }
 }

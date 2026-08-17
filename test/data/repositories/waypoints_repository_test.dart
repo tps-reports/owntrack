@@ -133,4 +133,54 @@ void main() {
       expect(repository.getAllWaypoints(), isEmpty);
     });
   });
+
+  changeStreamTests();
+}
+
+// The repository must announce mutations so watchers (the list screen, the
+// map's marker layer) can refresh. A silent repository is how a deleted
+// waypoint keeps rendering from a stale one-shot cache.
+void changeStreamTests() {
+  group('WaypointsRepository.changes', () {
+    late WaypointsRepository repository;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      repository = WaypointsRepository(SettingsLocalDataSource(prefs));
+    });
+
+    const waypoint = Waypoint(
+      id: 'wp-1',
+      lat: 40.2141,
+      lon: -111.6711,
+      timestamp: 1704110400,
+      description: 'Home',
+    );
+
+    test('emits on add, update and delete', () async {
+      final events = <void>[];
+      final sub = repository.changes.listen(events.add);
+
+      await repository.addWaypoint(waypoint);
+      await repository.updateWaypoint(waypoint);
+      await repository.deleteWaypoint(waypoint.id);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, hasLength(3));
+      await sub.cancel();
+    });
+
+    test('does not emit when deleting a waypoint that does not exist',
+        () async {
+      final events = <void>[];
+      final sub = repository.changes.listen(events.add);
+
+      await repository.deleteWaypoint('no-such-id');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, isEmpty);
+      await sub.cancel();
+    });
+  });
 }

@@ -63,7 +63,9 @@ final contactsRepositoryProvider = Provider<ContactsRepository>((ref) {
 /// Provides the waypoints repository for managing waypoints
 final waypointsRepositoryProvider = Provider<WaypointsRepository>((ref) {
   final localDataSource = ref.watch(settingsLocalDataSourceProvider);
-  return WaypointsRepository(localDataSource);
+  final repository = WaypointsRepository(localDataSource);
+  ref.onDispose(repository.dispose);
+  return repository;
 });
 
 /// Provides the regions repository for managing geofence regions
@@ -184,10 +186,13 @@ final friendsStreamProvider = StreamProvider<List<Friend>>((ref) {
   return repository.changes.map((_) => repository.getAllContacts());
 });
 
-/// Provides waypoints as a future
-final waypointsStreamProvider = FutureProvider<List<Waypoint>>((ref) async {
+/// Provides waypoints reactively: the current list immediately, then a fresh
+/// list after every repository mutation. A one-shot FutureProvider here is
+/// exactly how a deleted waypoint kept rendering from a stale cache.
+final waypointsStreamProvider = StreamProvider<List<Waypoint>>((ref) async* {
   final repository = ref.watch(waypointsRepositoryProvider);
-  return repository.getAllWaypoints();
+  yield repository.getAllWaypoints();
+  yield* repository.changes.map((_) => repository.getAllWaypoints());
 });
 
 /// Provides regions as a future

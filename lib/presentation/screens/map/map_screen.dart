@@ -608,7 +608,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(waypointsRepositoryProvider).addWaypoint(waypoint);
-      ref.invalidate(waypointsStreamProvider);
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(content: Text('Waypoint added')),
