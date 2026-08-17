@@ -24,14 +24,42 @@ Future<ProviderScope> _scoped(Widget child) async {
   );
 }
 
+final _addWaypointFab = find.byTooltip('Add waypoint');
+
 void main() {
   group('Map screen add-waypoint entry point', () {
-    testWidgets('shows an Add waypoint action chip on the map',
+    testWidgets('shows an Add waypoint FAB alongside the publish FAB',
         (tester) async {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
 
-      expect(find.text('Add waypoint'), findsOneWidget);
+      expect(_addWaypointFab, findsOneWidget);
+      expect(find.byTooltip('Publish location'), findsOneWidget);
+      expect(
+        find.ancestor(
+          of: _addWaypointFab,
+          matching: find.byType(FloatingActionButton),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('places both FABs in the lower-right quadrant',
+        (tester) async {
+      await tester.pumpWidget(await _scoped(const MapScreen()));
+      await tester.pump();
+
+      final screen = tester.getSize(find.byType(MaterialApp));
+      for (final finder in [
+        _addWaypointFab,
+        find.byTooltip('Publish location'),
+      ]) {
+        final center = tester.getCenter(finder);
+        expect(center.dx, greaterThan(screen.width / 2),
+            reason: 'FAB should sit right of centre');
+        expect(center.dy, greaterThan(screen.height / 2),
+            reason: 'FAB should sit below centre');
+      }
     });
 
     testWidgets('offers manual entry and map selection when tapped',
@@ -39,7 +67,7 @@ void main() {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
 
-      await tester.tap(find.text('Add waypoint'));
+      await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
 
       expect(find.text('Enter coordinates'), findsOneWidget);
@@ -51,7 +79,7 @@ void main() {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
 
-      await tester.tap(find.text('Add waypoint'));
+      await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Enter coordinates'));
       await tester.pumpAndSettle();
@@ -65,21 +93,21 @@ void main() {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
 
-      await tester.tap(find.text('Add waypoint'));
+      await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Pick on map'));
       await tester.pumpAndSettle();
 
       expect(find.text('Tap the map to place the waypoint'), findsOneWidget);
-      // The chip is replaced by the placement hint while placing.
-      expect(find.text('Add waypoint'), findsNothing);
+      // The add FAB is withheld while placing; the hint bar drives the flow.
+      expect(_addWaypointFab, findsNothing);
     });
 
     testWidgets('leaves placement mode when cancelled', (tester) async {
       await tester.pumpWidget(await _scoped(const MapScreen()));
       await tester.pump();
 
-      await tester.tap(find.text('Add waypoint'));
+      await tester.tap(_addWaypointFab);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Pick on map'));
       await tester.pumpAndSettle();
@@ -88,7 +116,45 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Tap the map to place the waypoint'), findsNothing);
-      expect(find.text('Add waypoint'), findsOneWidget);
+      expect(_addWaypointFab, findsOneWidget);
+    });
+  });
+
+  group('Navigation', () {
+    testWidgets('bottom bar has no Waypoints tab', (tester) async {
+      await tester.pumpWidget(await _scoped(const MapScreen()));
+      await tester.pump();
+
+      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Waypoints'),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('waypoints are managed from the Settings tab', (tester) async {
+      await tester.pumpWidget(await _scoped(const MapScreen()));
+      await tester.pump();
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Settings'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Waypoints'), findsOneWidget);
+
+      await tester.tap(find.text('Waypoints'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WaypointsScreen), findsOneWidget);
+      // Pushed as a route, so it must carry its own back affordance.
+      expect(find.byType(BackButton), findsOneWidget);
     });
   });
 

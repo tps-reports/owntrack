@@ -31,10 +31,10 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    // Verify navigation items
+    // Verify navigation items. Waypoints is managed from Settings, not a tab.
     expect(find.text('Map'), findsOneWidget);
     expect(find.text('Contacts'), findsOneWidget);
-    expect(find.text('Waypoints'), findsOneWidget);
     expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('Waypoints'), findsNothing);
   });
 }

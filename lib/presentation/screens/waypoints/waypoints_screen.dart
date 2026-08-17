@@ -12,6 +12,9 @@ class WaypointsScreen extends ConsumerWidget {
     final waypointsAsync = ref.watch(waypointsStreamProvider);
 
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Waypoints'),
+      ),
       body: waypointsAsync.when(
         data: (waypoints) {
           if (waypoints.isEmpty) {

@@ -54,7 +54,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              ref.read(selectedNavigationIndexProvider.notifier).setIndex(3);
+              ref.read(selectedNavigationIndexProvider.notifier).setIndex(2);
             },
             tooltip: 'Settings',
           ),
@@ -76,22 +76,42 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             label: 'Contacts',
           ),
           NavigationDestination(
-            icon: Icon(Icons.place),
-            label: 'Waypoints',
-          ),
-          NavigationDestination(
             icon: Icon(Icons.settings),
             label: 'Settings',
           ),
         ],
       ),
-      floatingActionButton: selectedIndex == 0
-          ? FloatingActionButton(
-              onPressed: _publishLocation,
-              tooltip: 'Publish location',
-              child: const Icon(Icons.send),
-            )
-          : null,
+      floatingActionButton: selectedIndex == 0 ? _buildMapFabs() : null,
+    );
+  }
+
+  /// The map tab's action buttons, stacked lower right.
+  ///
+  /// The add-waypoint FAB is withheld while a placement is in progress — the
+  /// hint bar at the top of the map drives that flow.
+  Widget _buildMapFabs() {
+    final tilesConfigured = ref.watch(mapTilerConfigProvider).isConfigured;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (tilesConfigured && !_placingWaypoint) ...[
+          FloatingActionButton.small(
+            heroTag: 'add-waypoint-fab',
+            onPressed: _startAddWaypoint,
+            tooltip: 'Add waypoint',
+            child: const Icon(Icons.add_location_alt),
+          ),
+          const SizedBox(height: 12),
+        ],
+        FloatingActionButton(
+          heroTag: 'publish-location-fab',
+          onPressed: _publishLocation,
+          tooltip: 'Publish location',
+          child: const Icon(Icons.send),
+        ),
+      ],
     );
   }
 
@@ -102,8 +122,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       case 1:
         return _buildContactsView();
       case 2:
-        return _buildWaypointsView();
-      case 3:
         return _buildSettingsView();
       default:
         return _buildMapView();
@@ -153,17 +171,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           bottom: 8,
           child: _buildAttributionBar(),
         ),
-        Positioned(
-          top: 8,
-          left: 8,
-          right: 8,
-          child: _placingWaypoint
-              ? _buildPlacementBar()
-              : Align(
-                  alignment: Alignment.centerLeft,
-                  child: _buildAddWaypointChip(),
-                ),
-        ),
+        if (_placingWaypoint)
+          Positioned(
+            top: 8,
+            left: 8,
+            right: 8,
+            child: _buildPlacementBar(),
+          ),
       ],
     );
   }
@@ -255,14 +269,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
-  Widget _buildAddWaypointChip() {
-    return ActionChip(
-      avatar: const Icon(Icons.add_location_alt, size: 18),
-      label: const Text('Add waypoint'),
-      onPressed: _startAddWaypoint,
-    );
-  }
-
   /// Hint bar shown while the user is choosing a point on the map.
   Widget _buildPlacementBar() {
     final hasPoint = _pendingPoint != null;
@@ -300,10 +306,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   Widget _buildContactsView() {
     return const ContactsScreen();
-  }
-
-  Widget _buildWaypointsView() {
-    return const WaypointsScreen();
   }
 
   Widget _buildSettingsView() {
@@ -347,6 +349,20 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               context,
               MaterialPageRoute(
                 builder: (context) => const IdentificationSettingsScreen(),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.place),
+          title: const Text('Waypoints'),
+          subtitle: const Text('Manage saved waypoints'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const WaypointsScreen(),
               ),
             );
           },
