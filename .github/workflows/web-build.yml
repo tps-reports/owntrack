@@ -1,0 +1,58 @@
+# web-build — the deployable web bundle for the fivex gateway.
+#
+# Authored 2026-09-01 as part of moving fivex's prod deploy onto CI-built
+# artifacts (the local build+sync path cost 92 minutes; see fivex
+# docs/conformance). Every webdav app ships the SAME workflow, differing only
+# in APP_SLUG: build web at the gateway base-href, upload the bundle as an
+# artifact the deploy can fetch instead of rebuilding locally.
+#
+# Standard build flags mirror fivex convention: --release, and
+# --no-tree-shake-icons (required across fivex Flutter web builds).
+name: web-build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  APP_SLUG: owntrack
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Tests run when the repo has any; a repo without tests must not fail
+      # the build for lacking them.
+      - name: flutter test (if present)
+        run: |
+          if [ -d test ] && ls test/*_test.dart test/**/*_test.dart 2>/dev/null | head -1 >/dev/null; then
+            flutter test
+          else
+            echo "no tests present — skipping"
+          fi
+
+      - name: build web bundle
+        run: flutter build web --release --no-tree-shake-icons --base-href "/${{ env.APP_SLUG }}/"
+
+      - name: stamp build provenance
+        run: |
+          printf '{"app":"%s","sha":"%s","ref":"%s","built":"%s"}\n' \
+            "${{ env.APP_SLUG }}" "${{ github.sha }}" "${{ github.ref_name }}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > build/web/build-info.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-${{ env.APP_SLUG }}
+          path: build/web
+          retention-days: 30
