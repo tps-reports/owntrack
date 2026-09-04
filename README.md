@@ -2,6 +2,18 @@
 
 A unified Flutter implementation of OwnTracks for Android and iOS, combining both native apps into a single codebase.
 
+[OwnTracks](https://owntracks.org/) has historically shipped as two separate
+native codebases — one Android, one iOS/macOS — each reimplementing the same
+protocol, storage, and map UI independently. This project is a from-scratch
+Flutter rewrite that speaks the same wire protocol (compatible with existing
+OwnTracks recorders/brokers) from a single codebase across Android, iOS,
+macOS, and web, so a fix or feature lands on every platform at once instead
+of twice.
+
+| Android | iOS |
+|---|---|
+| ![Android home screen: live map with a recorded track through San Francisco](screenshots/android_phone_home.png) | ![iPhone home screen: the same map view and tracking UI](screenshots/iphone_67_home.png) |
+
 ## Architecture
 
 This app uses a clean architecture pattern with:
