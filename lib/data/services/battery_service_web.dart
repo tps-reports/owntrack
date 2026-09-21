@@ -61,10 +61,7 @@ class BatteryServiceWeb {
 
     if (!supported || _batteryManager == null) {
       // Return default values if not supported
-      return const BatteryInfo(
-        level: 100,
-        state: BatteryState.unknown,
-      );
+      return const BatteryInfo(level: null, state: BatteryState.unknown);
     }
 
     try {
@@ -87,44 +84,10 @@ class BatteryServiceWeb {
 
       AppLogger.d('Web battery: $batteryLevel%, charging: $charging');
 
-      return BatteryInfo(
-        level: batteryLevel,
-        state: state,
-      );
+      return BatteryInfo(level: batteryLevel, state: state);
     } catch (e) {
       AppLogger.e('Error reading battery status: $e');
-      return const BatteryInfo(
-        level: 100,
-        state: BatteryState.unknown,
-      );
-    }
-  }
-
-  /// Add listeners for battery change events
-  static void addBatteryListeners(Function(BatteryInfo) onBatteryChange) async {
-    final supported = await isSupported();
-
-    if (!supported || _batteryManager == null) {
-      return;
-    }
-
-    try {
-      // Create event listeners for battery changes
-      final levelChangeCallback = ((JSAny? event) {
-        getBatteryInfo().then((info) => onBatteryChange(info));
-      }).toJS;
-
-      final chargingChangeCallback = ((JSAny? event) {
-        getBatteryInfo().then((info) => onBatteryChange(info));
-      }).toJS;
-
-      // Add event listeners
-      _batteryManager!.callMethod('addEventListener'.toJS, 'levelchange'.toJS, levelChangeCallback);
-      _batteryManager!.callMethod('addEventListener'.toJS, 'chargingchange'.toJS, chargingChangeCallback);
-
-      AppLogger.d('Battery event listeners added');
-    } catch (e) {
-      AppLogger.e('Error adding battery listeners: $e');
+      return const BatteryInfo(level: null, state: BatteryState.unknown);
     }
   }
 }

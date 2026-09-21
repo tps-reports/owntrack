@@ -1,17 +1,7 @@
 import 'package:owntrack/data/services/battery_service.dart';
 
-/// Stub implementation for non-web platforms
+/// Battery readings are unavailable through this adapter on native platforms.
 class BatteryServiceWeb {
-  static Future<bool> isSupported() async => false;
-
-  static Future<BatteryInfo> getBatteryInfo() async {
-    return const BatteryInfo(
-      level: 85,
-      state: BatteryState.discharging,
-    );
-  }
-
-  static void addBatteryListeners(Function(BatteryInfo) onBatteryChange) {
-    // No-op on non-web platforms
-  }
+  static Future<BatteryInfo> getBatteryInfo() async =>
+      const BatteryInfo(level: null, state: BatteryState.unknown);
 }

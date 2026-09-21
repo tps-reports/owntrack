@@ -1,0 +1,59 @@
+OwnTrack repair iteration 1 verification — 2026-09-20 America/Denver
+Working tree based on e59d7fcaa772faae674eef73172a28be462328d4; not committed.
+No deployment performed. Web builds had no map key; live tiles not verified.
+Only macOS and Chrome were connected; physical Android/iPhone tests not run.
+
+Default VM/widget suite — exit 0
+00:11 +224 ~1: All tests passed!
+
+Flutter analyzer — exit 0
+No issues found! (ran in 4.4s)
+
+Chrome IndexedDB integration — exit 0
+00:00 +1: All tests passed!
+
+Local Mosquitto QoS 1 integration — exit 0
+00:00 +1: All tests passed!
+
+Web release compile — exit 0
+✓ Built build/web
+
+WebAssembly release compile — exit 0
+✓ Built build/web
+
+Normal macOS release (ad-hoc signing) — exit 1
+/Users/michael/webdav/coyote_forge/mhunter/owntrack/macos/Runner.xcodeproj: error: "Runner" has entitlements that require signing with a development certificate. Enable development signing in the Signing & Capabilities editor. (in target 'Runner' from project 'Runner')
+** BUILD FAILED **
+
+Unsigned macOS Xcode compile — exit 0
+** BUILD SUCCEEDED **
+
+Android release compile (development signing) — exit 0
+Warning: Flutter support for your project's Kotlin version (2.2.20) will soon be dropped. Please upgrade your Kotlin version to a version of at least 2.3.20 soon.
+Warning: The plugin flutter_secure_storage requires Android SDK version 37 or higher.
+Warning: The plugin permission_handler_android requires Android SDK version 37 or higher.
+✓ Built build/app/outputs/flutter-apk/app-release.apk (60.7MB)
+
+Commands:
+flutter test --reporter expanded
+flutter analyze
+flutter test --platform chrome test/browser/outbox_test.dart
+flutter test --dart-define=MQTT_TEST_PORT=28884 test/integration/mqtt_broker_test.dart
+flutter build web --release --no-tree-shake-icons --base-href /owntrack/
+flutter build web --wasm --release --no-tree-shake-icons --base-href /owntrack/
+flutter build macos --release
+xcodebuild -workspace macos/Runner.xcworkspace -scheme Runner -configuration Release -derivedDataPath build/macos CODE_SIGNING_ALLOWED=NO build
+flutter build apk --release
+flutter build ios --release --no-codesign
+
+Broker: Mosquitto 2.1.2, loopback only on 127.0.0.1:28884; stopped after test.
+The default suite skips the broker check unless MQTT_TEST_PORT is provided.
+Android merged release manifest verified: fine/coarse/background location,
+foreground service/location, notifications, wake lock; geolocator service is
+nonexported with foregroundServiceType=location.
+Apple entitlements and iOS Xcode project passed plutil -lint.
+Git diff whitespace check passed.
+
+Unsigned iOS release compile — exit 0
+Xcode build done.                                           27.7s
+✓ Built build/ios/iphoneos/Runner.app (20.9MB)

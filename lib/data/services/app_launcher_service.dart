@@ -1,6 +1,6 @@
 import 'package:owntrack/data/repositories/settings_repository.dart';
 import 'package:owntrack/data/services/app_launcher_service_stub.dart'
-    if (dart.library.html) 'package:owntrack/data/services/app_launcher_service_web.dart';
+    if (dart.library.js_interop) 'package:owntrack/data/services/app_launcher_service_web.dart';
 
 /// Service for launching the mobile app from the web with settings
 ///

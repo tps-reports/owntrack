@@ -1,192 +1,224 @@
 import 'dart:async';
-import 'dart:io';
-
 import 'package:mqtt_client/mqtt_client.dart';
-import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:owntrack/core/utils/app_logger.dart';
 import 'package:owntrack/data/repositories/endpoint_state_repository.dart';
 import 'package:owntrack/data/repositories/settings_repository.dart';
+import 'package:owntrack/data/services/mqtt/client_factory.dart';
 
-/// MQTT client service for OwnTracks protocol
-///
-/// Handles connection, subscription, and publishing to MQTT broker
-/// with TLS support and automatic reconnection.
 class MqttService {
   final SettingsRepository _settingsRepository;
   final EndpointStateRepository _stateRepository;
-
-  MqttServerClient? _client;
-  StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>? _messageSubscription;
-
-  final StreamController<({String topic, String payload})> _messageController =
+  final MqttClient Function(String, String) _clientFactory;
+  MqttClient? _client;
+  bool _disposed = false;
+  int _generation = 0;
+  Future<bool>? _connecting;
+  StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>? _messages;
+  StreamSubscription<MqttPublishMessage>? _published;
+  final _pending = <int, Completer<bool>>{};
+  final _controller =
       StreamController<({String topic, String payload})>.broadcast();
-
-  /// Stream of received messages
-  Stream<({String topic, String payload})> get messages => _messageController.stream;
-
-  /// Check if currently connected
+  Stream<({String topic, String payload})> get messages => _controller.stream;
   bool get isConnected =>
+      !_disposed &&
       _client?.connectionStatus?.state == MqttConnectionState.connected;
 
-  MqttService(this._settingsRepository, this._stateRepository);
+  MqttService(
+    this._settingsRepository,
+    this._stateRepository, {
+    MqttClient Function(String, String)? clientFactory,
+  }) : _clientFactory = clientFactory ?? createMqttClient;
 
-  /// Connect to MQTT broker
-  Future<bool> connect() async {
+  Future<bool> connect() {
+    if (_disposed) return Future.value(false);
+    if (isConnected) return Future.value(true);
+    if (_connecting != null) return _connecting!;
+    final operation = _connect();
+    _connecting = operation;
+    return operation.whenComplete(() {
+      if (identical(_connecting, operation)) _connecting = null;
+    });
+  }
+
+  bool _ownsClient(MqttClient? client, int generation) =>
+      !_disposed &&
+      client != null &&
+      generation == _generation &&
+      identical(_client, client);
+
+  Future<void> _cancelSubscriptions() async {
+    final messages = _messages;
+    final published = _published;
+    _messages = null;
+    _published = null;
+    await Future.wait([
+      if (messages != null) messages.cancel(),
+      if (published != null) published.cancel(),
+    ]);
+  }
+
+  Future<bool> _connect() async {
+    final generation = ++_generation;
+    MqttClient? client;
     try {
       _stateRepository.setConnecting();
-
-      final host = _settingsRepository.getMqttHost();
-      final port = _settingsRepository.getMqttPort();
-      final clientId = _settingsRepository.getMqttClientId();
-      final username = _settingsRepository.getMqttUsername();
-      final password = _settingsRepository.getMqttPassword();
-      final useTls = _settingsRepository.getMqttUseTls();
-
-      if (host.isEmpty) {
-        AppLogger.e('MQTT host not configured');
-        _stateRepository.setError('MQTT host not configured');
-        return false;
-      }
-
-      AppLogger.i('Connecting to MQTT broker at $host:$port (TLS: $useTls)');
-
-      // Create client
-      _client = MqttServerClient(host, clientId);
-      _client!.port = port;
-      _client!.logging(on: false);
-      _client!.keepAlivePeriod = 60;
-      _client!.onDisconnected = _onDisconnected;
-      _client!.onConnected = _onConnected;
-      _client!.autoReconnect = true;
-
-      // Configure TLS if enabled
-      if (useTls) {
-        _client!.secure = true;
-        _client!.securityContext = SecurityContext.defaultContext;
-      }
-
-      // Set up connection message
-      final connMessage = MqttConnectMessage()
-          .withClientIdentifier(clientId)
-          .startClean()
-          .withWillQos(MqttQos.atLeastOnce);
-
-      if (username.isNotEmpty) {
-        connMessage.authenticateAs(username, password);
-      }
-
-      _client!.connectionMessage = connMessage;
-
-      // Connect
-      await _client!.connect();
-
-      if (_client!.connectionStatus?.state == MqttConnectionState.connected) {
-        AppLogger.i('MQTT connected successfully');
-        _stateRepository.setConnected();
-
-        // Subscribe to updates
-        _messageSubscription = _client!.updates!.listen(_onMessage);
-
-        return true;
-      } else {
-        AppLogger.e('MQTT connection failed: ${_client!.connectionStatus}');
-        _stateRepository.setError('Connection failed: ${_client!.connectionStatus}');
-        _client = null;
-        return false;
-      }
-    } catch (e) {
-      AppLogger.e('MQTT connection error: $e');
-      _stateRepository.setError('Connection error: $e');
+      final previousClient = _client;
       _client = null;
+      _failPending();
+      await _cancelSubscriptions();
+      previousClient?.disconnect();
+      if (_disposed || generation != _generation) return false;
+      final host = _settingsRepository.getMqttHost();
+      if (host.isEmpty) throw const FormatException('MQTT host not configured');
+      final id = _settingsRepository.getMqttClientId();
+      client = _clientFactory(host, id);
+      _client = client;
+      client.port = _settingsRepository.getMqttPort();
+      client.logging(on: false);
+      client.connectTimeoutPeriod = 10000;
+      client.keepAlivePeriod = 60;
+      // The processor owns reconnect timing and subscriptions.
+      client.autoReconnect = false;
+      configureMqttTransport(client, _settingsRepository.getMqttUseTls());
+      client.onDisconnected = () {
+        if (!_ownsClient(client, generation)) return;
+        _failPending();
+        unawaited(_cancelSubscriptions());
+        _stateRepository.setDisconnected();
+      };
+      final message = MqttConnectMessage()
+          .withClientIdentifier(id)
+          .startClean();
+      final username = _settingsRepository.getMqttUsername();
+      if (username.isNotEmpty) {
+        message.authenticateAs(username, _settingsRepository.getMqttPassword());
+      }
+      client.connectionMessage = message;
+      await client.connect().timeout(const Duration(seconds: 15));
+      if (!_ownsClient(client, generation)) {
+        client.disconnect();
+        return false;
+      }
+      if (!isConnected) throw StateError('Broker rejected the connection.');
+      _messages = client.updates?.listen((updates) {
+        if (!_ownsClient(client, generation) || !isConnected) return;
+        for (final update in updates) {
+          final message = update.payload;
+          if (message is! MqttPublishMessage ||
+              message.payload.message.length > 1024 * 1024) {
+            _stateRepository.setError('Invalid or oversized MQTT message.');
+            continue;
+          }
+          _controller.add((
+            topic: update.topic,
+            payload: MqttPublishPayload.bytesToStringAsString(
+              message.payload.message,
+            ),
+          ));
+        }
+      });
+      _published = client.published?.listen((message) {
+        if (!_ownsClient(client, generation) || !isConnected) return;
+        final pending = _pending.remove(
+          message.variableHeader?.messageIdentifier,
+        );
+        pending?.complete(true);
+      });
+      _stateRepository.setConnected();
+      return true;
+    } catch (_) {
+      if (!_disposed && generation == _generation) {
+        _generation++;
+        _client = null;
+        _failPending();
+        _stateRepository.setError(
+          'MQTT connection failed. Check host, port, credentials and TLS.',
+        );
+        AppLogger.w('MQTT connection failed.');
+        await _cancelSubscriptions();
+      }
+      client?.disconnect();
       return false;
     }
   }
 
-  /// Disconnect from MQTT broker
+  void _failPending() {
+    for (final pending in _pending.values) {
+      pending.complete(false);
+    }
+    _pending.clear();
+  }
+
   Future<void> disconnect() async {
-    AppLogger.i('Disconnecting from MQTT broker');
-    await _messageSubscription?.cancel();
-    _messageSubscription = null;
-    _client?.disconnect();
+    _generation++;
+    _connecting = null;
+    final client = _client;
     _client = null;
-    _stateRepository.setDisconnected();
+    _failPending();
+    if (!_disposed) _stateRepository.setDisconnected();
+    await _cancelSubscriptions();
+    client?.disconnect();
   }
 
-  /// Subscribe to a topic
   void subscribe(String topic, {MqttQos qos = MqttQos.atLeastOnce}) {
-    if (!isConnected) {
-      AppLogger.w('Cannot subscribe to $topic - not connected');
-      return;
-    }
-
-    AppLogger.i('Subscribing to topic: $topic');
-    _client!.subscribe(topic, qos);
+    if (isConnected) _client!.subscribe(topic, qos);
   }
 
-  /// Unsubscribe from a topic
   void unsubscribe(String topic) {
-    if (!isConnected) {
-      AppLogger.w('Cannot unsubscribe from $topic - not connected');
-      return;
-    }
-
-    AppLogger.i('Unsubscribing from topic: $topic');
-    _client!.unsubscribe(topic);
+    if (isConnected) _client!.unsubscribe(topic);
   }
 
-  /// Publish a message to a topic
   Future<bool> publish(
     String topic,
     String payload, {
     MqttQos qos = MqttQos.atLeastOnce,
     bool retain = false,
   }) async {
-    if (!isConnected) {
-      AppLogger.w('Cannot publish to $topic - not connected');
-      return false;
-    }
-
+    if (!isConnected) return false;
+    final client = _client!;
+    final generation = _generation;
     try {
-      AppLogger.d('Publishing to $topic: $payload');
-      final builder = MqttClientPayloadBuilder();
-      builder.addString(payload);
-      _client!.publishMessage(topic, qos, builder.payload!, retain: retain);
-      return true;
-    } catch (e) {
-      AppLogger.e('Error publishing message: $e');
+      final builder = MqttClientPayloadBuilder()..addString(payload);
+      final id = client.publishMessage(
+        topic,
+        qos,
+        builder.payload!,
+        retain: retain,
+      );
+      // QoS 0 cannot prove broker acceptance. Durable delivery uses QoS 1 or 2.
+      if (qos == MqttQos.atMostOnce ||
+          !_ownsClient(client, generation) ||
+          !isConnected) {
+        return false;
+      }
+      final pending = Completer<bool>();
+      _pending[id] = pending;
+      try {
+        return await pending.future.timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => false,
+        );
+      } finally {
+        if (identical(_pending[id], pending)) _pending.remove(id);
+      }
+    } catch (_) {
+      if (_ownsClient(client, generation)) {
+        _stateRepository.setError(
+          'MQTT delivery failed; message retained for retry.',
+        );
+      }
       return false;
     }
   }
 
-  /// Handle incoming messages
-  void _onMessage(List<MqttReceivedMessage<MqttMessage>> messages) {
-    for (final message in messages) {
-      final topic = message.topic;
-      final payload = MqttPublishPayload.bytesToStringAsString(
-        (message.payload as MqttPublishMessage).payload.message,
-      );
-
-      AppLogger.d('Received message on $topic: $payload');
-      _messageController.add((topic: topic, payload: payload));
-    }
-  }
-
-  /// Handle connection established
-  void _onConnected() {
-    AppLogger.i('MQTT connection established');
-    _stateRepository.setConnected();
-  }
-
-  /// Handle disconnection
-  void _onDisconnected() {
-    AppLogger.w('MQTT disconnected');
-    _stateRepository.setDisconnected();
-  }
-
-  /// Clean up resources
   void dispose() {
-    _messageSubscription?.cancel();
-    _messageController.close();
+    _disposed = true;
+    _generation++;
+    _connecting = null;
+    _failPending();
+    unawaited(_cancelSubscriptions());
     _client?.disconnect();
+    _client = null;
+    _controller.close();
   }
 }

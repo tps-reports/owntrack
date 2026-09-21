@@ -52,7 +52,10 @@ void main() {
 
       expect(newRepository.count, equals(1));
       expect(newRepository.getWaypoint('waypoint1'), isNotNull);
-      expect(newRepository.getWaypoint('waypoint1')?.description, equals('Test Waypoint'));
+      expect(
+        newRepository.getWaypoint('waypoint1')?.description,
+        equals('Test Waypoint'),
+      );
     });
 
     test('should update waypoint', () async {
@@ -69,7 +72,10 @@ void main() {
       final updated = waypoint.copyWith(description: 'Updated Waypoint');
       await repository.updateWaypoint(updated);
 
-      expect(repository.getWaypoint('waypoint1')?.description, equals('Updated Waypoint'));
+      expect(
+        repository.getWaypoint('waypoint1')?.description,
+        equals('Updated Waypoint'),
+      );
     });
 
     test('should delete waypoint', () async {
@@ -171,16 +177,18 @@ void changeStreamTests() {
       await sub.cancel();
     });
 
-    test('does not emit when deleting a waypoint that does not exist',
-        () async {
-      final events = <void>[];
-      final sub = repository.changes.listen(events.add);
+    test(
+      'does not emit when deleting a waypoint that does not exist',
+      () async {
+        final events = <void>[];
+        final sub = repository.changes.listen(events.add);
 
-      await repository.deleteWaypoint('no-such-id');
-      await Future<void>.delayed(Duration.zero);
+        await repository.deleteWaypoint('no-such-id');
+        await Future<void>.delayed(Duration.zero);
 
-      expect(events, isEmpty);
-      await sub.cancel();
-    });
+        expect(events, isEmpty);
+        await sub.cancel();
+      },
+    );
   });
 }

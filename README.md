@@ -1,6 +1,36 @@
 # OwnTracks Flutter
 
-A unified Flutter implementation of OwnTracks for Android and iOS, combining both native apps into a single codebase.
+OwnTracks lets you keep track of your own location — and share it only with the
+people you choose, on infrastructure you control. Historically that meant two
+separate native apps (Kotlin/Java for Android, Objective-C for iOS) evolving in
+parallel. This project replaces both with a single Flutter codebase that runs
+on **Android, iOS, and the web**: real-time location publishing over MQTT or
+HTTP, geofencing with enter/exit events, waypoint management, and end-to-end
+XSalsa20-Poly1305 payload encryption — one implementation of the OwnTracks protocol,
+three platforms, no vendor cloud in the loop.
+
+## Screenshots
+
+| Android | Web |
+|:---:|:---:|
+| <img src="screenshots/android_map.png" alt="Map screen on Android" width="280"/> | <img src="screenshots/web_map.png" alt="Map screen in the browser" width="480"/> |
+
+## Quick Start
+
+```bash
+git clone <this-repo>
+cd owntrack
+flutter pub get
+flutter build apk        # Android release APK
+```
+
+That builds out of the box. To see map tiles you also need a (free) MapTiler
+key — see [Map tiles](#map-tiles-required) below. Run it locally with:
+
+```bash
+flutter run -d chrome --dart-define=MAPS_API_KEY=$MAPS_API_KEY   # web
+flutter run --dart-define=MAPS_API_KEY=$MAPS_API_KEY             # device/emulator
+```
 
 ## Architecture
 
@@ -8,8 +38,8 @@ This app uses a clean architecture pattern with:
 
 - **State Management**: Riverpod with code generation
 - **Navigation**: go_router
-- **Database**: Drift (SQLite)
-- **Maps**: flutter_map with OpenStreetMap tiles
+- **Storage**: transactional SQLite outbox on native platforms, IndexedDB outbox on web, SharedPreferences for nonsecret settings
+- **Maps**: flutter_map with MapTiler/OpenStreetMap tiles
 - **Networking**: MQTT (mqtt_client) and HTTP (dio)
 
 ## Project Structure
@@ -101,7 +131,7 @@ flutter test test/core/errors/failures_test.dart
 flutter analyze
 
 # Format code
-flutter format lib/ test/
+dart format lib/ test/
 ```
 
 ### Building
@@ -116,149 +146,90 @@ flutter build apk
 # Build iOS (requires macOS and Xcode)
 flutter build ios
 
-# Build with specific flavor (future)
-flutter run --flavor gms  # Google Play Services build
-flutter run --flavor oss  # Open source build
+# Build for web
+flutter build web --release --dart-define=MAPS_API_KEY=$MAPS_API_KEY
 ```
 
-## Phase 0 Completion Status
+## Status
 
-✅ Flutter project structure created
-✅ Dependencies configured (Riverpod, flutter_map, Drift, etc.)
-✅ Logging and error handling setup
-✅ Navigation with go_router configured
-✅ Material 3 theme implemented
-✅ Initial tests written (16 tests passing)
-✅ Code analysis passing with no issues
+The repair loop and current evidence are recorded in the
+[quality regrade](docs/quality/2026-09-20/regrade-3.md). Release readiness still
+requires physical-device background/GPS and native secure-storage tests,
+deployed-broker and Recorder interoperability, and an accessibility review.
 
-## Phase 1 Completion Status
+- **Delivery**: startup owns MQTT/HTTP reception and retry processing. HTTP uses
+  POST response messages; native MQTT uses sockets/TLS and browser MQTT uses WSS.
+  Messages remain in the transactional outbox until HTTP success or a broker
+  acknowledgement. Retries do not silently discard messages.
+- **Storage**: the outbox accepts at most 10,000 records or 20 MiB. Capacity errors
+  are surfaced to callers. Legacy preference queues migrate before startup;
+  records without an original destination remain blocked for recovery. Changing
+  an endpoint or encryption identity never redirects existing queued locations.
+  **Settings → Outbox** can export selected stored envelopes, discard confirmed
+  records, and retry delivery after the original settings are restored. Exports
+  contain private location history; keep them in a trusted destination. There is
+  no automatic expiry, rerouting, ciphertext conversion, or export-file import.
+- **Secrets**: native credentials use verified secure storage; browser credentials
+  live only in session memory, survive startup retries, and must be entered
+  again after a page reload. Shareable
+  configuration omits endpoints and secrets. When restored settings conflict with
+  credentials stored on the device, startup requires choosing each source and
+  confirming the selection before migration. Confirmation warns that unselected
+  versions will be discarded. Selected writes are verified before removing
+  restored plaintext copies; keep any old encryption keys needed to recover
+  queued ciphertext.
+- **Encryption**: OwnTracks secretbox framing uses a zero-padded UTF-8 key of up
+  to 32 bytes, a 24-byte nonce, and XSalsa20-Poly1305 authentication. An independent
+  libsodium vector is covered by tests. Legacy ciphertext is retained, not
+  silently converted or transmitted under a different key.
+- **Tracking**: Quiet and Manual do not open an automatic GPS stream. Explicit
+  publication is allowed in both modes. Mode changes reconfigure active tracking.
+  Significant and Move use distinct acquisition settings. **Tracking → Publication
+  settings** controls the minimum interval, movement threshold, heartbeat and
+  optional heading trigger. Defaults are 30 seconds, 50 metres and five minutes,
+  with heading disabled. Scheduling uses monotonic time; heartbeat requires fresh
+  fixes from the operating system. Native battery readings are currently unavailable
+  and omitted, rather than fabricated.
+  On iOS, background permission requires an actual Always authorization;
+  foreground permission alone is insufficient. A permanently denied upgrade
+  offers OS Settings recovery, and permission status refreshes on app resume.
+- **Geofencing**: the first confident fix establishes occupancy without an entry
+  event. Subsequent crossings apply an accuracy-aware margin of at least 10 metres.
+  Failed queue insertion retains each original crossing in memory for retry on
+  the next fix, independently for overlapping regions. Once accepted, the event
+  lives in the durable outbox; an unaccepted event cannot survive process death.
+- **UI**: publication reports durable queue acceptance, and delivery errors/backlog
+  are visible. Map, contacts, waypoint/region management and settings remain
+  available; missing tile configuration has an explicit empty state.
+  Failed settings writes stay visible and retryable. Credential recovery shows
+  source labels without displaying secret values and requires a fresh settings
+  reload after a failed migration attempt.
 
-✅ All OwnTracks message models implemented (7 types)
-✅ Core data models implemented (Friend, Waypoint, Region, LocationUpdate)
-✅ Manual toJson/fromJson serialization for all models
-✅ Repositories implemented with persistence:
-  - ContactsRepository (in-memory with Stream updates)
-  - SettingsRepository (SharedPreferences)
-  - WaypointsRepository (SharedPreferences with JSON)
-  - RegionsRepository (SharedPreferences with JSON)
-  - LocationRepository (current state management)
-  - EndpointStateRepository (connection state tracking)
-  - MessageQueueRepository (persistent queue with retry logic)
-✅ Comprehensive test suite (59 tests passing)
-✅ Code analysis passing with no issues
-✅ Android & iOS builds successful
+Additional integration checks:
 
-## Phase 2 Completion Status
+```bash
+flutter test --platform chrome test/browser/outbox_test.dart test/browser/bootstrap_recovery_test.dart
+# Start an isolated loopback MQTT broker first, then use its port:
+flutter test --dart-define=MQTT_TEST_PORT=28884 test/integration/mqtt_broker_test.dart
+# Create temporary authenticated TLS/WSS brokers, run checks, then clean up:
+bash tool/verify_mqtt_tls.sh
+bash tool/verify_mqtt_wss.sh
+```
 
-✅ Network layer services implemented:
-  - MqttService (connection, TLS/SSL, pub/sub, auto-reconnect)
-  - HttpService (polling, POST endpoints)
-  - EncryptionService (ChaCha20-Poly1305 AEAD encryption)
-  - MessageProcessor (coordinates MQTT/HTTP, encryption, queue management)
-✅ Retry logic with exponential backoff
-✅ Comprehensive test suite (95 tests passing)
-✅ Code analysis passing with no issues
-✅ Android build successful
+The secure transport checks require Mosquitto and its clients, OpenSSL, Python 3,
+and Chrome for WSS. They cover real publish/receive, rejected credentials and
+certificates, and reconnect. Browser trust is limited to one temporary fixture
+leaf certificate in the test profile; system trust is untouched. Native TLS also
+checks hostname rejection. These local checks do not verify production broker
+deployment or device keychains.
 
-## Phase 3 Completion Status
+The checked-in CI workflow runs browser storage and isolated plaintext/TLS/WSS
+broker tests as blocking steps. Hosted execution must still be verified after
+pushing.
 
-✅ Platform services implemented:
-  - LocationService (foreground/background tracking, monitoring modes)
-  - PermissionService (location, notifications, background permissions)
-  - GeofencingService (region monitoring with enter/exit events)
-  - TrackingService (coordinator for location, geofencing, publishing)
-  - BatteryService (battery level and charging state monitoring)
-✅ Monitoring modes support (quiet, manual, significant, move)
-✅ Smart location publishing (time/distance filters for battery optimization)
-✅ Comprehensive test suite (120 tests passing)
-✅ Code analysis passing with no issues
-✅ Android build successful
-
-## Phase 4 Completion Status
-
-✅ UI layer implemented:
-  - MapScreen with flutter_map and OpenStreetMap tiles
-  - Bottom navigation (Map, Contacts, Waypoints, Settings)
-  - Connection settings screen (MQTT/HTTP configuration)
-  - Tracking settings screen (monitoring modes, permissions)
-  - Identification settings screen (device/tracker IDs)
-  - Placeholder views for Contacts and Waypoints (ready for data integration)
-✅ Widget tests for settings screens (10 new tests)
-✅ Comprehensive test suite (130 tests passing)
-✅ Code analysis passing (2 deprecation warnings)
-✅ Android build successful
-
-## Phase 5 Completion Status
-
-✅ State management integrated:
-  - Riverpod providers for all repositories and services
-  - FutureProvider for waypoints and regions
-  - StreamProvider for contacts with real-time updates
-  - State providers for UI state (navigation index, etc.)
-✅ Fully functional screens:
-  - ContactsScreen - displays friends with battery, location, timestamps
-  - WaypointsScreen - full CRUD operations (add, edit, delete)
-  - RegionsScreen - geofence management with enable/disable toggle
-  - MapScreen - displays friend/waypoint markers and region circles
-✅ Data integration:
-  - Friend model uses lat/lon, battery, timestamp
-  - Waypoint model uses description as display name
-  - Region model uses displayDescription getter
-  - All screens properly connected to repositories
-✅ Code analysis passing (6 deprecation warnings)
-✅ Android build successful
-
-## Phase 6 Completion Status
-
-✅ Settings persistence implemented:
-  - SharedPreferences initialized in main.dart on app startup
-  - SettingsLocalDataSource properly overridden with provider
-  - All settings screens save/load from persistent storage
-✅ Connection settings screen:
-  - Saves/loads MQTT broker configuration (host, port, TLS, auth)
-  - Saves/loads HTTP endpoint URL
-  - Saves/loads connection mode preference
-✅ Tracking settings screen:
-  - Saves/loads monitoring mode to SharedPreferences
-  - Updates trackingEnabledProvider state
-  - Monitoring mode persists across app restarts
-✅ Identification settings screen:
-  - Saves/loads device ID and tracker ID
-  - Settings persist across restarts
-✅ Code analysis passing (6 deprecation warnings)
-✅ Android build successful
-
-## Phase 7 Completion Status
-
-✅ Live services integration implemented:
-  - Permission request flows in TrackingSettingsScreen
-  - Real-time permission checking (location, background, notifications)
-  - Permission dialog for permanently denied permissions
-  - Tracking toggle connected to TrackingService
-  - LocationService wired to TrackingService via providers
-  - MQTT publishing via MessageProcessor
-  - HTTP publishing via MessageProcessor
-  - Background location support integrated
-✅ Service providers created for all services:
-  - LocationService, BatteryService, GeofencingService
-  - MqttService, HttpService, EncryptionService
-  - MessageProcessor, TrackingService, PermissionService
-✅ Full tracking lifecycle:
-  - Start/stop tracking from UI
-  - Location updates published via MQTT/HTTP
-  - Geofence transitions detected and published
-  - Smart location filtering (time/distance)
-  - Battery-optimized tracking modes
-✅ Code analysis passing (no issues)
-✅ Android build successful
-
-## Next Steps - Phase 8: Final Polish
-
-- Add manual location publish button
-- Implement configuration import/export
-- Add waypoint sharing
-- Final testing on physical devices
-- App store preparation
+The Android release build currently uses the repository's development signing
+configuration. It is not a store-ready signed release. The local build reports
+SDK/Kotlin compatibility warnings; see the regrade before distribution.
 
 ## Dependencies
 
@@ -268,7 +239,7 @@ flutter run --flavor oss  # Open source build
 - **logger**: Logging framework
 
 ### Data
-- **drift**: SQLite database (prepared for future use)
+- **drift**: transactional native outbox storage
 - **shared_preferences**: Settings storage
 
 ### Networking
@@ -280,14 +251,14 @@ flutter run --flavor oss  # Open source build
 - **geolocator**: Location services
 - **permission_handler**: Permissions
 - **flutter_background_service**: Background tasks
-- **workmanager**: Scheduled tasks
 
 ### Maps
-- **flutter_map**: OpenStreetMap maps
+- **flutter_map**: Map rendering
 - **latlong2**: Latitude/longitude calculations
 
 ### Security
-- **cryptography**: Encryption (libsodium equivalent)
+- **pinenacl**: OwnTracks-compatible secretbox payload encryption
+- **cryptography**: SHA-256 destination identity fingerprints
 - **flutter_secure_storage**: Secure key storage
 
 ### UI/UX

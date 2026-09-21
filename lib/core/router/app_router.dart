@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:owntrack/presentation/screens/map/map_screen.dart';
 import 'package:owntrack/presentation/screens/settings/settings_screen.dart';
+import 'package:owntrack/presentation/screens/settings/outbox_screen.dart';
 
 /// Application routes
 class AppRoutes {
@@ -13,6 +14,7 @@ class AppRoutes {
   static const String waypoints = '/waypoints';
   static const String regions = '/regions';
   static const String settings = '/settings';
+  static const String outbox = '/outbox';
   static const String status = '/status';
   static const String welcome = '/welcome';
 }
@@ -22,31 +24,27 @@ final goRouter = GoRouter(
   initialLocation: AppRoutes.home,
   routes: [
     GoRoute(
+      path: AppRoutes.outbox,
+      builder: (context, state) => const OutboxScreen(),
+    ),
+    GoRoute(
       path: AppRoutes.home,
-      pageBuilder: (context, state) => MaterialPage(
-        key: state.pageKey,
-        child: const MapScreen(),
-      ),
+      pageBuilder: (context, state) =>
+          MaterialPage(key: state.pageKey, child: const MapScreen()),
     ),
     GoRoute(
       path: AppRoutes.map,
-      pageBuilder: (context, state) => MaterialPage(
-        key: state.pageKey,
-        child: const MapScreen(),
-      ),
+      pageBuilder: (context, state) =>
+          MaterialPage(key: state.pageKey, child: const MapScreen()),
     ),
     GoRoute(
       path: AppRoutes.settings,
-      pageBuilder: (context, state) => MaterialPage(
-        key: state.pageKey,
-        child: const SettingsScreen(),
-      ),
+      pageBuilder: (context, state) =>
+          MaterialPage(key: state.pageKey, child: const SettingsScreen()),
     ),
   ],
   errorBuilder: (context, state) => Scaffold(
     appBar: AppBar(title: const Text('Error')),
-    body: Center(
-      child: Text('Page not found: ${state.uri}'),
-    ),
+    body: Center(child: Text('Page not found: ${state.uri}')),
   ),
 );

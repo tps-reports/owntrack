@@ -1,3 +1,4 @@
+import 'package:owntrack/data/services/contact_message_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:owntrack/core/config/map_tiler_config.dart';
 import 'package:owntrack/data/datasources/local/preferences/settings_local_datasource.dart';
@@ -13,6 +14,7 @@ import 'package:owntrack/data/repositories/settings_repository.dart';
 import 'package:owntrack/data/repositories/waypoints_repository.dart';
 import 'package:owntrack/data/services/app_launcher_service.dart';
 import 'package:owntrack/data/services/battery_service.dart';
+import 'package:owntrack/data/services/connection_probe.dart';
 import 'package:owntrack/data/services/encryption_service.dart';
 import 'package:owntrack/data/services/geofencing_service.dart';
 import 'package:owntrack/data/services/http_service.dart';
@@ -39,7 +41,9 @@ final mapTilerConfigProvider = Provider<MapTilerConfig>((ref) {
 
 /// Provides the settings local data source
 /// This is overridden in main.dart with a real SharedPreferences instance
-final settingsLocalDataSourceProvider = Provider<SettingsLocalDataSource>((ref) {
+final settingsLocalDataSourceProvider = Provider<SettingsLocalDataSource>((
+  ref,
+) {
   throw UnimplementedError(
     'SettingsLocalDataSource must be overridden in main.dart with SharedPreferences',
   );
@@ -57,7 +61,9 @@ final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
 
 /// Provides the contacts repository for managing friends
 final contactsRepositoryProvider = Provider<ContactsRepository>((ref) {
-  return ContactsRepository();
+  final service = ContactsRepository();
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the waypoints repository for managing waypoints
@@ -71,7 +77,8 @@ final waypointsRepositoryProvider = Provider<WaypointsRepository>((ref) {
 /// Provides the regions repository for managing geofence regions
 final regionsRepositoryProvider = Provider<RegionsRepository>((ref) {
   final localDataSource = ref.watch(settingsLocalDataSourceProvider);
-  return RegionsRepository(localDataSource);
+  final service = RegionsRepository(localDataSource);
+  return service;
 });
 
 /// Provides the location repository for current location state
@@ -80,15 +87,19 @@ final locationRepositoryProvider = Provider<LocationRepository>((ref) {
 });
 
 /// Provides the endpoint state repository for connection status
-final endpointStateRepositoryProvider =
-    Provider<EndpointStateRepository>((ref) {
-  return EndpointStateRepository();
+final endpointStateRepositoryProvider = Provider<EndpointStateRepository>((
+  ref,
+) {
+  final service = EndpointStateRepository();
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the message queue repository for reliable message delivery
 final messageQueueRepositoryProvider = Provider<MessageQueueRepository>((ref) {
-  final localDataSource = ref.watch(settingsLocalDataSourceProvider);
-  return MessageQueueRepository(localDataSource);
+  throw StateError(
+    'MessageQueueRepository must be initialized by application startup.',
+  );
 });
 
 // ============================================================================
@@ -102,19 +113,25 @@ final permissionServiceProvider = Provider<PermissionService>((ref) {
 
 /// Provides the battery service for battery monitoring
 final batteryServiceProvider = Provider<BatteryService>((ref) {
-  return BatteryService();
+  final service = BatteryService();
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the location service for GPS tracking
 final locationServiceProvider = Provider<LocationService>((ref) {
   final settingsRepo = ref.watch(settingsRepositoryProvider);
-  return LocationService(settingsRepo);
+  final service = LocationService(settingsRepo);
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the geofencing service for region monitoring
 final geofencingServiceProvider = Provider<GeofencingService>((ref) {
   final regionsRepo = ref.watch(regionsRepositoryProvider);
-  return GeofencingService(regionsRepo);
+  final service = GeofencingService(regionsRepo);
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the encryption service for message encryption
@@ -127,14 +144,18 @@ final encryptionServiceProvider = Provider<EncryptionService>((ref) {
 final mqttServiceProvider = Provider<MqttService>((ref) {
   final settingsRepo = ref.watch(settingsRepositoryProvider);
   final stateRepo = ref.watch(endpointStateRepositoryProvider);
-  return MqttService(settingsRepo, stateRepo);
+  final service = MqttService(settingsRepo, stateRepo);
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the HTTP service for HTTP protocol communication
 final httpServiceProvider = Provider<HttpService>((ref) {
   final settingsRepo = ref.watch(settingsRepositoryProvider);
   final stateRepo = ref.watch(endpointStateRepositoryProvider);
-  return HttpService(settingsRepo, stateRepo);
+  final service = HttpService(settingsRepo, stateRepo);
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the message processor for coordinating MQTT/HTTP communication
@@ -144,29 +165,41 @@ final messageProcessorProvider = Provider<MessageProcessor>((ref) {
   final mqttService = ref.watch(mqttServiceProvider);
   final httpService = ref.watch(httpServiceProvider);
   final encryptionService = ref.watch(encryptionServiceProvider);
-  return MessageProcessor(
+  final service = MessageProcessor(
     settingsRepo,
     queueRepo,
     mqttService,
     httpService,
     encryptionService,
   );
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the tracking service for coordinating location tracking
+final trackingClockProvider = Provider<Duration Function()>((ref) {
+  final clock = Stopwatch()..start();
+  ref.onDispose(clock.stop);
+  return () => clock.elapsed;
+});
+
 final trackingServiceProvider = Provider<TrackingService>((ref) {
   final locationService = ref.watch(locationServiceProvider);
   final geofencingService = ref.watch(geofencingServiceProvider);
   final messageProcessor = ref.watch(messageProcessorProvider);
   final settingsRepo = ref.watch(settingsRepositoryProvider);
   final batteryService = ref.watch(batteryServiceProvider);
-  return TrackingService(
+  final service = TrackingService(
     locationService,
     geofencingService,
     messageProcessor,
     settingsRepo,
     batteryService,
+    monotonicNow: ref.watch(trackingClockProvider),
+    publicationPolicy: settingsRepo.getPublicationPolicy,
   );
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Provides the app launcher service for launching mobile app from web
@@ -180,10 +213,11 @@ final appLauncherServiceProvider = Provider<AppLauncherService>((ref) {
 // ============================================================================
 
 /// Provides a stream of friends/contacts
-final friendsStreamProvider = StreamProvider<List<Friend>>((ref) {
+final friendsStreamProvider = StreamProvider<List<Friend>>((ref) async* {
   final repository = ref.watch(contactsRepositoryProvider);
   // Convert the change stream to a stream of friend lists
-  return repository.changes.map((_) => repository.getAllContacts());
+  yield repository.getAllContacts();
+  yield* repository.changes.map((_) => repository.getAllContacts());
 });
 
 /// Provides waypoints reactively: the current list immediately, then a fresh
@@ -257,3 +291,47 @@ final selectedNavigationIndexProvider =
     NotifierProvider<SelectedNavigationIndexNotifier, int>(
       SelectedNavigationIndexNotifier.new,
     );
+final connectionProbeProvider = Provider<ConnectionProbe>((ref) {
+  final probe = ConnectionProbe();
+  ref.onDispose(probe.dispose);
+  return probe;
+});
+
+/// Subscriptions are established before delivery or acquisition begins.
+final applicationRuntimeProvider = FutureProvider<void>((ref) async {
+  final processor = ref.watch(messageProcessorProvider);
+  final router = ContactMessageRouter(ref.watch(contactsRepositoryProvider));
+  final battery = ref.watch(batteryServiceProvider);
+  final location = ref.watch(locationServiceProvider);
+  final locations = ref.watch(locationRepositoryProvider);
+  final tracking = ref.watch(trackingServiceProvider);
+  final incoming = processor.incomingMessages.listen(router.accept);
+  final positions = location.locationUpdates.listen(
+    locations.updateLocation,
+    onError: (Object _) {
+      locations.clearLocation();
+    },
+  );
+  final trackingStatus = tracking.statusChanges.listen((_) {
+    ref.read(trackingEnabledProvider.notifier).setEnabled(tracking.isTracking);
+  });
+  ref.onDispose(() {
+    incoming.cancel();
+    positions.cancel();
+    trackingStatus.cancel();
+    battery.stopMonitoring();
+  });
+  battery.startMonitoring();
+  await processor.start();
+});
+
+final deliveryErrorProvider = StreamProvider<String?>((ref) async* {
+  final processor = ref.watch(messageProcessorProvider);
+  yield processor.lastError;
+  yield* processor.statusChanges;
+});
+final queueSizeProvider = StreamProvider<int>((ref) async* {
+  final queue = ref.watch(messageQueueRepositoryProvider);
+  yield queue.size;
+  yield* queue.changes;
+});

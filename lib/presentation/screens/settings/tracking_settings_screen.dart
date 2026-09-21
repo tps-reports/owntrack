@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:owntrack/core/constants/app_constants.dart';
+import 'package:owntrack/core/utils/app_logger.dart';
 import 'package:owntrack/data/services/permission_service.dart';
 import 'package:owntrack/domain/providers/app_providers.dart';
+import 'package:owntrack/presentation/screens/settings/publication_settings_screen.dart';
 
 /// Tracking settings screen for location and monitoring configuration
 class TrackingSettingsScreen extends ConsumerStatefulWidget {
@@ -13,19 +17,39 @@ class TrackingSettingsScreen extends ConsumerStatefulWidget {
       _TrackingSettingsScreenState();
 }
 
-class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen> {
+class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
+    with WidgetsBindingObserver {
   int _monitoringMode = AppConstants.monitoringModeSignificant;
   bool _isTracking = false;
   AppPermissionStatus _locationPermission = AppPermissionStatus.denied;
   AppPermissionStatus _notificationPermission = AppPermissionStatus.denied;
-  bool _backgroundLocationGranted = false;
+  AppPermissionStatus _backgroundLocationPermission =
+      AppPermissionStatus.denied;
   bool _isCheckingPermissions = true;
+  bool _openingSettings = false;
+
+  bool get _backgroundLocationGranted =>
+      _backgroundLocationPermission == AppPermissionStatus.granted;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSettings();
     _checkPermissions();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_checkPermissions());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   void _loadSettings() {
@@ -40,16 +64,20 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
     final permissionService = ref.read(permissionServiceProvider);
 
     final locationStatus = await permissionService.checkLocationPermission();
-    final notificationStatus =
-        await permissionService.checkNotificationPermission();
-    final backgroundLocationStatus =
-        await permissionService.checkBackgroundLocationPermission();
+    final notificationStatus = await permissionService
+        .checkNotificationPermission();
+    final backgroundLocationStatus = await permissionService
+        .checkBackgroundLocationPermission();
 
     if (mounted) {
       setState(() {
         _locationPermission = locationStatus;
         _notificationPermission = notificationStatus;
-        _backgroundLocationGranted = backgroundLocationStatus;
+        if (backgroundLocationStatus) {
+          _backgroundLocationPermission = AppPermissionStatus.granted;
+        } else if (_backgroundLocationGranted) {
+          _backgroundLocationPermission = AppPermissionStatus.denied;
+        }
         _isCheckingPermissions = false;
       });
     }
@@ -58,9 +86,7 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tracking'),
-      ),
+      appBar: AppBar(title: const Text('Tracking')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -135,7 +161,7 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
                           mode: AppConstants.monitoringModeQuiet,
                           icon: Icons.bedtime,
                           title: 'Quiet',
-                          subtitle: 'Minimal tracking for battery saving',
+                          subtitle: 'No automatic location sharing',
                         ),
                         _buildModeOption(
                           mode: AppConstants.monitoringModeManual,
@@ -176,16 +202,23 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
                       ListTile(
                         leading: const Icon(Icons.location_on),
                         title: const Text('Location Permission'),
-                        subtitle: Text(_getPermissionSubtitle(_locationPermission)),
+                        subtitle: Text(
+                          _getPermissionSubtitle(_locationPermission),
+                        ),
                         trailing: _buildPermissionTrailing(_locationPermission),
                         onTap: () => _requestLocationPermission(),
                       ),
                       ListTile(
                         leading: const Icon(Icons.gps_fixed),
                         title: const Text('Background Location'),
-                        subtitle: Text(_backgroundLocationGranted
-                            ? 'Granted - can track in background'
-                            : 'Not granted - foreground only'),
+                        subtitle: Text(
+                          _backgroundLocationGranted
+                              ? 'Granted - can track in background'
+                              : _backgroundLocationPermission ==
+                                    AppPermissionStatus.permanentlyDenied
+                              ? 'Denied - tap to open settings'
+                              : 'Not granted - foreground only',
+                        ),
                         trailing: Icon(
                           _backgroundLocationGranted
                               ? Icons.check_circle
@@ -194,18 +227,38 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
                               ? Colors.green
                               : Colors.orange,
                         ),
-                        onTap: () => _requestBackgroundLocationPermission(),
+                        onTap: _openingSettings
+                            ? null
+                            : () => _requestBackgroundLocationPermission(),
                       ),
                       ListTile(
                         leading: const Icon(Icons.notifications),
                         title: const Text('Notification Permission'),
-                        subtitle: Text(_getPermissionSubtitle(_notificationPermission)),
-                        trailing:
-                            _buildPermissionTrailing(_notificationPermission),
+                        subtitle: Text(
+                          _getPermissionSubtitle(_notificationPermission),
+                        ),
+                        trailing: _buildPermissionTrailing(
+                          _notificationPermission,
+                        ),
                         onTap: () => _requestNotificationPermission(),
                       ),
                     ],
                   ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.timer),
+              title: const Text('Publication settings'),
+              subtitle: const Text('Intervals, movement and heading changes'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const PublicationSettingsScreen(),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -223,11 +276,7 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
     return RadioListTile<int>(
       value: mode,
       title: Row(
-        children: [
-          Icon(icon, size: 20),
-          const SizedBox(width: 8),
-          Text(title),
-        ],
+        children: [Icon(icon, size: 20), const SizedBox(width: 8), Text(title)],
       ),
       subtitle: Text(subtitle),
       selected: isSelected,
@@ -295,7 +344,9 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Failed to start tracking. Check permissions and location services.'),
+              content: Text(
+                'Failed to start tracking. Check permissions and location services.',
+              ),
               backgroundColor: Colors.red,
             ),
           );
@@ -325,12 +376,34 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
 
   void _saveMonitoringMode(int mode) async {
     final settingsRepo = ref.read(settingsRepositoryProvider);
-    await settingsRepo.setMonitoringMode(mode);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Monitoring mode set to ${_getModeName(mode)}')),
-      );
+    try {
+      await settingsRepo.setMonitoringMode(mode);
+      if (ref.read(trackingEnabledProvider)) {
+        final running = await ref.read(trackingServiceProvider).reconfigure();
+        ref.read(trackingEnabledProvider.notifier).setEnabled(running);
+        if (!running) {
+          throw StateError(
+            'Unable to apply tracking mode. Check location permissions.',
+          );
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Monitoring mode set to ${_getModeName(mode)}'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Unable to apply tracking mode. Check permissions and try again.',
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -387,22 +460,33 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
   }
 
   Future<void> _requestBackgroundLocationPermission() async {
+    if (_backgroundLocationPermission ==
+        AppPermissionStatus.permanentlyDenied) {
+      await _showOpenSettingsDialog('Background Location');
+      return;
+    }
     final permissionService = ref.read(permissionServiceProvider);
-    final status = await permissionService.requestBackgroundLocationPermission();
+    final status = await permissionService
+        .requestBackgroundLocationPermission();
 
     if (mounted) {
       setState(() {
-        _backgroundLocationGranted = status == AppPermissionStatus.granted;
+        _backgroundLocationPermission = status;
       });
 
-      if (status == AppPermissionStatus.granted) {
+      if (status == AppPermissionStatus.permanentlyDenied) {
+        await _showOpenSettingsDialog('Background Location');
+      } else if (status == AppPermissionStatus.granted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Background location permission granted')),
+          const SnackBar(
+            content: Text('Background location permission granted'),
+          ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text('Background location permission denied')),
+            content: Text('Background location permission denied'),
+          ),
         );
       }
     }
@@ -434,29 +518,51 @@ class _TrackingSettingsScreenState extends ConsumerState<TrackingSettingsScreen>
     }
   }
 
-  void _showOpenSettingsDialog(String permissionName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('$permissionName Permission Required'),
-        content: Text(
-          '$permissionName permission has been permanently denied. Please enable it in app settings.',
+  Future<void> _showOpenSettingsDialog(String permissionName) async {
+    if (_openingSettings) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    setState(() => _openingSettings = true);
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('$permissionName Permission Required'),
+          content: Text(
+            '$permissionName permission has been permanently denied. Please enable it in app settings.',
+          ),
+          scrollable: true,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Open Settings'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              Navigator.of(context).pop();
-              final permissionService = ref.read(permissionServiceProvider);
-              await permissionService.openAppSettings();
-            },
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
-    );
+      );
+      if (confirmed != true || !mounted) return;
+      final permissionService = ref.read(permissionServiceProvider);
+      if (!await permissionService.openAppSettings()) {
+        throw StateError('The operating system did not open app settings.');
+      }
+    } catch (_) {
+      AppLogger.w('OS app settings could not be opened.');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Unable to open app settings. Open Settings on your device and select OwnTracks.',
+              ),
+            ),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _openingSettings = false);
+    }
   }
 }

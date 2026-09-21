@@ -19,6 +19,28 @@ void main() {
       service = EncryptionService(settingsRepository);
     });
 
+    test('decrypts an independent libsodium OwnTracks vector', () async {
+      await settingsRepository.setEncryptionKey('owntracks-test');
+      // libsodium crypto_secretbox_easy, key UTF-8 zero-padded to 32 bytes,
+      // nonce bytes 0..23, then nonce || MAC || ciphertext (Recorder contract).
+      const vector =
+          'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXQBliSRcQtSHN1Onh6uXZ+KB4cLdMVxYoFq04NsUcldnJL3rGtHbYqSzds4+RXzjfdWXALA==';
+      expect(
+        await service.decrypt(vector),
+        '{"_type":"location","lat":1,"lon":2}',
+      );
+    });
+
+    test(
+      'rejects malformed encrypted envelope data without throwing',
+      () async {
+        expect(
+          await service.decryptMessage({'_type': 'encrypted', 'data': 42}),
+          isNull,
+        );
+      },
+    );
+
     group('when encryption is disabled', () {
       test('should return original payload when encrypting', () async {
         const payload = '{"test": "data"}';
@@ -100,11 +122,7 @@ void main() {
       });
 
       test('should encrypt message with OwnTracks format', () async {
-        final message = {
-          '_type': 'location',
-          'lat': 37.7749,
-          'lon': -122.4194,
-        };
+        final message = {'_type': 'location', 'lat': 37.7749, 'lon': -122.4194};
 
         final encrypted = await service.encryptMessage(message);
 
@@ -114,11 +132,7 @@ void main() {
       });
 
       test('should decrypt OwnTracks encrypted message', () async {
-        final message = {
-          '_type': 'location',
-          'lat': 37.7749,
-          'lon': -122.4194,
-        };
+        final message = {'_type': 'location', 'lat': 37.7749, 'lon': -122.4194};
 
         final encrypted = await service.encryptMessage(message);
         final decrypted = await service.decryptMessage(encrypted!);
@@ -130,11 +144,7 @@ void main() {
       });
 
       test('should return plain message if not encrypted type', () async {
-        final message = {
-          '_type': 'location',
-          'lat': 37.7749,
-          'lon': -122.4194,
-        };
+        final message = {'_type': 'location', 'lat': 37.7749, 'lon': -122.4194};
 
         final result = await service.decryptMessage(message);
         expect(result, equals(message));

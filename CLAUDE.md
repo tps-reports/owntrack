@@ -11,7 +11,7 @@ OwnTracks Flutter is a unified Flutter implementation of OwnTracks for Android, 
 **Key Technologies**:
 - State Management: Riverpod with provider pattern
 - Navigation: go_router
-- Database: Drift (SQLite) prepared, currently using SharedPreferences
+- Storage: SQLite/Drift native outbox, IndexedDB web outbox, SharedPreferences for nonsecret settings
 - Maps: flutter_map with OpenStreetMap tiles
 - Networking: mqtt_client and dio (HTTP)
 - Location: geolocator with background tracking support
@@ -90,6 +90,74 @@ python3 -m http.server 8000 --directory build/web
 # Clean build artifacts
 flutter clean
 ```
+
+### Building with Anvil
+
+This project is registered with **Anvil**, the FiveX build and deployment system, via the `.anvil` file at the repo root. Anvil discovers projects by scanning WebDAV storage for `.anvil` files — the file is the registration mechanism; it is version-controlled and must stay at the repo root.
+
+**What `.anvil` declares for owntrack:**
+- **Platforms**: `web_wasm` (WASM build, `--base-href /owntrack/`, no icon tree-shaking, artifact at `build/web/`), `macos` (artifact at `build/macos/Build/Products/Release/owntrack.app`), and `android_apk` (artifact at `build/app/outputs/flutter-apk/app-release.apk`).
+- **Environments**: `local`, `dev`, and `prod`, each with a `config_url` carrying the MQTT host/port, relying-party ID, and the MapTiler key as a `${MAPS_API_KEY}` placeholder. The placeholder is expanded from the shell environment at launch time so the tracked file never contains the secret — `export MAPS_API_KEY=<key>` before running.
+- **Connections**: `mosquitto` (MQTT) and `nginx` (gateway).
+- **Versioning**: derived from git tags (`version.source: git_tag`).
+
+**The anvil CLI is not on PATH** — it lives in the FiveX repo at `/Users/michael/code/fivex` and is run with `dart run`:
+
+```bash
+# From /Users/michael/code/fivex
+
+# List available devices/simulators
+dart run mod_dart/bin/dev_runner.dart devices
+
+# Run owntrack locally using its .anvil config (env: local | dev | prod)
+# Non-web targets receive --dart-define=FIVEX_CONFIG=<expanded config_url>;
+# the app reads maps_key/mqtt settings from that URL.
+export MAPS_API_KEY=<your-maptiler-key>
+dart run mod_dart/bin/dev_runner.dart run \
+  --app owntrack \
+  --root /Users/michael/webdav/coyote_forge/mhunter \
+  --env local \
+  --target macos            # or android_apk, or an explicit flutter device id
+
+# Web targets (chrome, web_wasm) get NO dart-define from anvil — web builds are
+# domain-relative by design (the same artifact serves any domain). For web the
+# MapTiler key must still be passed directly (see MapTiler API Key below).
+dart run mod_dart/bin/dev_runner.dart run \
+  --app owntrack --root /Users/michael/webdav/coyote_forge/mhunter \
+  --env local --target chrome
+
+# Canonical one-off platform build (same entrypoint the build worker uses)
+dart run mod_dart/bin/build_flutter.dart \
+  --platform web-wasm \
+  --project /Users/michael/webdav/coyote_forge/mhunter/owntrack \
+  --base-href /owntrack/
+dart run mod_dart/bin/build_flutter.dart \
+  --platform apk \
+  --project /Users/michael/webdav/coyote_forge/mhunter/owntrack
+```
+
+**Environment progression**: `local` → `dev` → `prod`. The `dev` and `prod` environments use `mode: host_artifact` with `nginx_static` as the web deploy target (served at `/owntrack/` per `host_path`); `local` uses `mode: native` (`flutter_run_chrome`, `local_launch`, `adb_install`). Promotion of artifacts is an explicit, tracked operation handled by anvil — never a manual file copy into the `releases/` tree.
+
+Anvil principles and the full deploy CLI (`dart run mod_dart/bin/anvil.dart`) are documented in `/Users/michael/code/fivex/docs/anvil.md` and `/Users/michael/code/fivex/mod_dart/CLAUDE.md`.
+
+### MapTiler API Key
+
+The map screen needs a MapTiler key at **compile time** (`String.fromEnvironment` — a shell variable alone is not enough). `MapTilerConfig.fromEnvironment()` (`lib/core/config/map_tiler_config.dart`) resolves it in priority order:
+
+1. the `MAPS_API_KEY` dart-define;
+2. the `maps_key` query parameter of the `FIVEX_CONFIG` dart-define (the URL anvil's dev_runner passes from `.anvil`'s `config_url` on non-web targets).
+
+For plain `flutter run` / `flutter build` (including all web builds), pass the key directly:
+
+```bash
+flutter run --dart-define=MAPS_API_KEY=$MAPS_API_KEY
+flutter build web --release --dart-define=MAPS_API_KEY=$MAPS_API_KEY
+
+# Or via the git-ignored defines file (see dart_defines.example.json)
+flutter run --dart-define-from-file=dart_defines.json
+```
+
+Without a key the map throws a `StateError` rather than degrading to a blank tile grid. The key ships in the client bundle by necessity — restrict it by allowed origin in the MapTiler dashboard.
 
 ## Architecture Overview
 
@@ -196,11 +264,11 @@ UI Screen → SettingsRepository → SettingsLocalDataSource → SharedPreferenc
 - Platform-specific implementations:
   - **Web**: Uses Battery Status API with feature detection (`battery_service_web.dart`)
     - Checks `navigator.getBattery()` availability before use
-    - Subscribes to `levelchange` and `chargingchange` events
-    - Falls back to default values if API unavailable
-  - **Mobile**: Simulated data (TODO: integrate battery_plus package)
+    - Reads supported browser battery status
+    - Reports unavailable readings as null; never fabricates a battery level
+  - **Native**: unavailable readings are null and omitted from location messages
 - Uses conditional imports to load platform-specific code
-- Periodic polling (5 min) with event-driven updates on web
+- Periodic polling (5 min), with deterministic timer disposal
 
 ### Platform Detection
 
@@ -248,12 +316,12 @@ All services and repositories are provided via Riverpod providers in `domain/pro
 
 **Data Repositories:**
 - `ContactsRepository` - In-memory with Stream-based change notification
-- `SettingsRepository` - SharedPreferences-backed configuration
+- `SettingsRepository` - SharedPreferences configuration plus native secure/session-only browser secrets
 - `WaypointsRepository` - SharedPreferences with JSON serialization
 - `RegionsRepository` - SharedPreferences with JSON serialization
 - `LocationRepository` - Current location state
 - `EndpointStateRepository` - Connection state tracking
-- `MessageQueueRepository` - Persistent message queue
+- `MessageQueueRepository` - Transactional native SQLite/web IndexedDB outbox
 
 **UI State:**
 - Bottom navigation index via `selectedNavigationIndexProvider`
@@ -279,16 +347,17 @@ All services and repositories are provided via Riverpod providers in `domain/pro
 
 **HTTP Mode:**
 - POST location updates to configured endpoint
-- Polling for incoming messages
+- Incoming messages are dispatched from POST responses
 
 ### Important Implementation Details
 
-**Initialization Sequence** (in `main.dart`):
-1. Initialize Flutter bindings
-2. Initialize SharedPreferences
-3. Create SettingsLocalDataSource
-4. Override `settingsLocalDataSourceProvider`
-5. Launch app with ProviderScope
+**Initialization Sequence** (`main.dart` → `bootstrap.dart`):
+1. Initialize Flutter bindings and show the bootstrap widget
+2. Open SharedPreferences and the platform secret store; migrate legacy secrets
+3. Open and migrate the transactional outbox
+4. Override initialized repositories in ProviderScope
+5. Start application receive subscriptions, battery monitoring and delivery
+6. Render a retryable startup error if storage initialization fails
 
 **Permission Handling:**
 - Location permissions checked via PermissionService
@@ -297,14 +366,14 @@ All services and repositories are provided via Riverpod providers in `domain/pro
 - Permissions requested in TrackingSettingsScreen
 
 **Background Tracking:**
-- Uses flutter_background_service for continuous tracking
+- Uses geolocator Android foreground notification settings and Apple location settings; physical-device background endurance remains unverified
 - Foreground service notification on Android
 - Background location permission required
 - Battery optimized via monitoring modes and smart filtering
 
 **Encryption:**
-- ChaCha20-Poly1305 AEAD encryption via cryptography package
-- Keys stored in flutter_secure_storage
+- OwnTracks XSalsa20-Poly1305 secretbox framing via pinenacl
+- Native keys stored in flutter_secure_storage; browser keys are session-only
 - Encryption enabled/disabled per configuration
 - Applied to both MQTT and HTTP messages
 
@@ -353,7 +422,7 @@ test/
 - Use `mocktail` for mocking dependencies
 - Widget tests use `ProviderScope` with overrides
 
-**Current Test Count:** 130 tests passing
+**Verification:** see `docs/quality/2026-09-20/regrade-1.md` for the current test and build evidence.
 
 ### Code Generation
 

@@ -20,10 +20,7 @@ void main() {
     });
 
     test('should add contact', () {
-      const friend = Friend(
-        id: 'friend1',
-        topic: 'owntracks/user/device',
-      );
+      const friend = Friend(id: 'friend1', topic: 'owntracks/user/device');
 
       repository.updateContact(friend);
 
@@ -32,15 +29,9 @@ void main() {
     });
 
     test('should emit ContactAdded event when adding new contact', () {
-      const friend = Friend(
-        id: 'friend1',
-        topic: 'owntracks/user/device',
-      );
+      const friend = Friend(id: 'friend1', topic: 'owntracks/user/device');
 
-      expectLater(
-        repository.changes,
-        emits(isA<ContactAdded>()),
-      );
+      expectLater(repository.changes, emits(isA<ContactAdded>()));
 
       repository.updateContact(friend);
     });
@@ -70,20 +61,14 @@ void main() {
 
       repository.updateContact(friend);
 
-      expectLater(
-        repository.changes,
-        emits(isA<ContactUpdated>()),
-      );
+      expectLater(repository.changes, emits(isA<ContactUpdated>()));
 
       final updated = friend.copyWith(name: 'Jane');
       repository.updateContact(updated);
     });
 
     test('should remove contact', () {
-      const friend = Friend(
-        id: 'friend1',
-        topic: 'owntracks/user/device',
-      );
+      const friend = Friend(id: 'friend1', topic: 'owntracks/user/device');
 
       repository.updateContact(friend);
       repository.removeContact('friend1');
@@ -93,17 +78,11 @@ void main() {
     });
 
     test('should emit ContactRemoved event when removing contact', () async {
-      const friend = Friend(
-        id: 'friend1',
-        topic: 'owntracks/user/device',
-      );
+      const friend = Friend(id: 'friend1', topic: 'owntracks/user/device');
 
       repository.updateContact(friend);
 
-      expectLater(
-        repository.changes,
-        emits(isA<ContactRemoved>()),
-      );
+      expectLater(repository.changes, emits(isA<ContactRemoved>()));
 
       repository.removeContact('friend1');
     });

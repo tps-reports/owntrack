@@ -8,29 +8,21 @@ import 'package:owntrack/data/services/battery_service_stub.dart'
     if (dart.library.js_interop) 'package:owntrack/data/services/battery_service_web.dart';
 
 /// Battery state
-enum BatteryState {
-  full,
-  charging,
-  discharging,
-  unknown,
-}
+enum BatteryState { full, charging, discharging, unknown }
 
 /// Battery information
 class BatteryInfo {
-  final int level; // 0-100
+  final int? level; // 0-100
   final BatteryState state;
 
-  const BatteryInfo({
-    required this.level,
-    required this.state,
-  });
+  const BatteryInfo({required this.level, required this.state});
 
   bool get isCharging =>
       state == BatteryState.charging || state == BatteryState.full;
 
-  bool get isLowBattery => level < 20;
+  bool get isLowBattery => level != null && level! < 20;
 
-  bool get isCriticalBattery => level < 10;
+  bool get isCriticalBattery => level != null && level! < 10;
 }
 
 /// Battery monitoring service
@@ -45,6 +37,8 @@ class BatteryInfo {
 class BatteryService {
   BatteryInfo? _lastBatteryInfo;
   Timer? _batteryTimer;
+  bool _disposed = false;
+  int _generation = 0;
 
   final StreamController<BatteryInfo> _batteryController =
       StreamController<BatteryInfo>.broadcast();
@@ -57,18 +51,8 @@ class BatteryService {
 
   /// Start monitoring battery
   void startMonitoring() {
-    AppLogger.i('Starting battery monitoring');
-
-    // Get initial battery state
+    if (_disposed || _batteryTimer != null) return;
     _updateBatteryInfo();
-
-    // On web, also set up battery event listeners if supported
-    if (PlatformUtils.isWeb) {
-      BatteryServiceWeb.addBatteryListeners((info) {
-        _lastBatteryInfo = info;
-        _batteryController.add(info);
-      });
-    }
 
     // Check battery every 5 minutes (fallback polling)
     _batteryTimer = Timer.periodic(const Duration(minutes: 5), (_) {
@@ -78,19 +62,17 @@ class BatteryService {
 
   /// Stop monitoring battery
   void stopMonitoring() {
-    AppLogger.i('Stopping battery monitoring');
+    _generation++;
     _batteryTimer?.cancel();
     _batteryTimer = null;
   }
 
   /// Update battery information
   Future<void> _updateBatteryInfo() async {
+    final generation = _generation;
     try {
-      // In a real implementation, you would use battery_plus package
-      // or platform channels to get actual battery information.
-      // For now, we'll simulate it.
-
       final batteryInfo = await _getBatteryInfo();
+      if (_disposed || generation != _generation) return;
       _lastBatteryInfo = batteryInfo;
       _batteryController.add(batteryInfo);
 
@@ -105,23 +87,12 @@ class BatteryService {
 
   /// Get current battery information
   Future<BatteryInfo> _getBatteryInfo() async {
-    // TODO: Implement actual battery monitoring using battery_plus package
-    // or platform channels for mobile platforms.
-
-    if (PlatformUtils.isWeb) {
-      // Use Battery Status API on web with feature detection
-      return await BatteryServiceWeb.getBatteryInfo();
-    }
-
-    // Simulated battery data for mobile (TODO: use battery_plus)
-    return const BatteryInfo(
-      level: 85,
-      state: BatteryState.discharging,
-    );
+    if (PlatformUtils.isWeb) return BatteryServiceWeb.getBatteryInfo();
+    return const BatteryInfo(level: null, state: BatteryState.unknown);
   }
 
-  /// Get current battery level (0-100)
-  int get batteryLevel => _lastBatteryInfo?.level ?? 100;
+  /// Null means that the operating system has not supplied a battery reading.
+  int? get batteryLevel => _lastBatteryInfo?.level;
 
   /// Check if device is charging
   bool get isCharging => _lastBatteryInfo?.isCharging ?? false;
@@ -131,7 +102,8 @@ class BatteryService {
 
   /// Clean up resources
   void dispose() {
-    _batteryTimer?.cancel();
+    _disposed = true;
+    stopMonitoring();
     _batteryController.close();
   }
 }

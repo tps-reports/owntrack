@@ -1,6 +1,8 @@
 # Uncomment this line to define a global platform for your project
 # platform :ios, '15.0'
 
+require 'shellwords'
+
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
@@ -39,5 +41,17 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    next unless target.name == 'permission_handler_apple'
+
+    # Enable the native when-in-use -> always upgrade when CocoaPods is used.
+    # The plugin's Swift Package manifest derives this from Info.plist itself.
+    target.build_configurations.each do |config|
+      existing = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
+      definitions = existing.is_a?(String) ? Shellwords.split(existing) : Array(existing).dup
+      definitions << '$(inherited)' unless definitions.include?('$(inherited)')
+      definitions.reject! { |definition| definition.match?(/\APERMISSION_LOCATION(?:=|\z)/) }
+      definitions << 'PERMISSION_LOCATION=1'
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+    end
   end
 end

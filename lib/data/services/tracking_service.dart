@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:owntrack/core/utils/app_logger.dart';
+import 'package:owntrack/core/constants/app_constants.dart';
 import 'package:owntrack/data/models/location_update.dart';
 import 'package:owntrack/data/repositories/settings_repository.dart';
 import 'package:owntrack/data/services/battery_service.dart';
 import 'package:owntrack/data/services/geofencing_service.dart';
 import 'package:owntrack/data/services/location_service.dart';
 import 'package:owntrack/data/services/message_processor.dart';
+import 'package:owntrack/data/services/tracking_publication_policy.dart';
 
 /// Tracking service coordinator
 ///
@@ -20,139 +22,194 @@ class TrackingService {
   final BatteryService _batteryService;
 
   StreamSubscription<LocationUpdate>? _locationSubscription;
-  StreamSubscription<GeofenceTransition>? _geofenceSubscription;
 
-  DateTime? _lastPublishTime;
+  final DateTime Function() _now;
+  final Duration Function() _monotonicNow;
+  final TrackingPublicationPolicy Function() _publicationPolicy;
+  Duration? _lastPublishElapsed;
+  Future<void> _lifecycle = Future<void>.value();
+  Future<void> _updates = Future<void>.value();
+  Future<void>? _manualPublication;
+  bool _running = false;
+  bool _disposed = false;
+  int _generation = 0;
+  int _stopRevision = 0;
+  final _statusController = StreamController<String?>.broadcast();
+  String? lastError;
+  Stream<String?> get statusChanges => _statusController.stream;
+
+  void _reportError(Object error) {
+    if (_disposed) return;
+    lastError = error.toString();
+    AppLogger.e('Tracking operation failed: $error');
+    _statusController.add(lastError);
+  }
+
+  Future<T> _serialize<T>(Future<T> Function() operation) {
+    final result = Completer<T>();
+    _lifecycle = _lifecycle.then((_) async {
+      try {
+        result.complete(await operation());
+      } catch (error, stack) {
+        result.completeError(error, stack);
+      }
+    });
+    return result.future;
+  }
+
   LocationUpdate? _lastPublishedLocation;
-
-  /// Minimum time between location publishes (seconds)
-  static const int minPublishInterval = 30;
-
-  /// Minimum distance for location publish (meters)
-  static const int minPublishDistance = 50;
 
   TrackingService(
     this._locationService,
     this._geofencingService,
     this._messageProcessor,
     this._settingsRepository,
-    this._batteryService,
-  );
+    this._batteryService, {
+    DateTime Function()? now,
+    Duration Function()? monotonicNow,
+    TrackingPublicationPolicy Function()? publicationPolicy,
+  }) : _now = now ?? DateTime.now,
+       _monotonicNow = monotonicNow ?? _startMonotonicClock(),
+       _publicationPolicy = publicationPolicy ?? TrackingPublicationPolicy.new;
+
+  static Duration Function() _startMonotonicClock() {
+    final clock = Stopwatch()..start();
+    return () => clock.elapsed;
+  }
+
+  void _resetPublicationHistory() {
+    _lastPublishElapsed = null;
+    _lastPublishedLocation = null;
+  }
+
+  void _clearError() {
+    if (_disposed || lastError == null) return;
+    lastError = null;
+    _statusController.add(null);
+  }
 
   /// Start tracking
-  Future<bool> startTracking() async {
-    try {
-      AppLogger.i('Starting tracking service');
-
-      // Start location tracking
+  Future<bool> startTracking() {
+    final stopRevision = _stopRevision;
+    return _serialize(() async {
+      if (_disposed || stopRevision != _stopRevision) return false;
+      if (!_running) {
+        _resetPublicationHistory();
+        _running = true;
+        _locationSubscription = _locationService.locationUpdates.listen(
+          (location) {
+            final generation = _generation;
+            _updates = _updates.then((_) async {
+              if (!_running || generation != _generation || _disposed) return;
+              await _onLocationUpdate(location);
+            });
+          },
+          onError: (Object error) {
+            _running = false;
+            _generation++;
+            _reportError(error);
+            unawaited(_locationSubscription?.cancel());
+            _locationSubscription = null;
+          },
+        );
+      }
       final started = await _locationService.startTracking();
-      if (!started) {
-        AppLogger.e('Failed to start location tracking');
+      if (_disposed || stopRevision != _stopRevision || !_running) {
+        await _stopTracking();
         return false;
       }
-
-      // Subscribe to location updates
-      _locationSubscription = _locationService.locationUpdates.listen(
-        _onLocationUpdate,
-        onError: (error) {
-          AppLogger.e('Location update error: $error');
-        },
-      );
-
-      // Subscribe to geofence transitions
-      _geofenceSubscription = _geofencingService.transitions.listen(
-        _onGeofenceTransition,
-        onError: (error) {
-          AppLogger.e('Geofence transition error: $error');
-        },
-      );
-
-      AppLogger.i('Tracking service started successfully');
+      if (!started) {
+        await _stopTracking();
+        _reportError(
+          StateError(
+            'Location unavailable. Check permissions and location services.',
+          ),
+        );
+        return false;
+      }
+      lastError = null;
+      _statusController.add(null);
       return true;
-    } catch (e) {
-      AppLogger.e('Error starting tracking service: $e');
-      return false;
-    }
+    });
   }
 
-  /// Stop tracking
-  Future<void> stopTracking() async {
-    AppLogger.i('Stopping tracking service');
+  /// Calling start again reapplies the persisted mode without duplicating listeners.
+  Future<bool> reconfigure() => startTracking();
 
+  Future<void> stopTracking() {
+    _running = false;
+    _stopRevision++;
+    _generation++;
+    return _serialize(_stopTracking);
+  }
+
+  Future<void> _stopTracking() async {
+    _running = false;
+    _generation++;
     await _locationSubscription?.cancel();
     _locationSubscription = null;
-
-    await _geofenceSubscription?.cancel();
-    _geofenceSubscription = null;
-
     await _locationService.stopTracking();
-
-    AppLogger.i('Tracking service stopped');
+    await _updates;
+    _resetPublicationHistory();
+    if (!_disposed) _statusController.add(null);
   }
+
+  bool _acceptable(LocationUpdate location) =>
+      _publicationPolicy().isAcceptable(location, now: _now());
 
   /// Handle location update
   Future<void> _onLocationUpdate(LocationUpdate location) async {
+    final generation = _generation;
     try {
+      final mode = _settingsRepository.getMonitoringMode();
+      if (!_running ||
+          mode == AppConstants.monitoringModeQuiet ||
+          mode == AppConstants.monitoringModeManual) {
+        return;
+      }
+      if (!_acceptable(location)) {
+        _reportError(
+          StateError(
+            'Location fix rejected: stale, inaccurate, mocked or invalid.',
+          ),
+        );
+        return;
+      }
       // Check geofences
       await _geofencingService.checkLocation(
         location.latitude,
         location.longitude,
+        accuracy: location.accuracy,
+        timestamp: location.timestampSeconds,
+        acceptTransition: (transition) async {
+          if (!_running || _disposed || generation != _generation) {
+            throw StateError('Geofence publication cancelled.');
+          }
+          await _publishTransition(transition);
+        },
       );
+      if (!_running || _disposed || generation != _generation) return;
+      _clearError();
 
       // Determine if we should publish this location
-      if (_shouldPublishLocation(location)) {
+      if (_running && _shouldPublishLocation(location)) {
         await _publishLocation(location);
       }
     } catch (e) {
-      AppLogger.e('Error handling location update: $e');
-    }
-  }
-
-  /// Handle geofence transition
-  Future<void> _onGeofenceTransition(GeofenceTransition transition) async {
-    try {
-      AppLogger.i(
-        'Geofence ${transition.event == GeofenceEvent.enter ? "enter" : "exit"}: '
-        '${transition.region.displayDescription}',
-      );
-
-      // Publish transition message
-      await _publishTransition(transition);
-    } catch (e) {
-      AppLogger.e('Error handling geofence transition: $e');
+      if (_running && generation == _generation) _reportError(e);
     }
   }
 
   /// Determine if location should be published
   bool _shouldPublishLocation(LocationUpdate location) {
-    // Always publish if this is the first location
-    if (_lastPublishTime == null || _lastPublishedLocation == null) {
-      return true;
-    }
-
-    // Check time interval
-    final now = DateTime.now();
-    final timeSinceLastPublish = now.difference(_lastPublishTime!).inSeconds;
-    if (timeSinceLastPublish < minPublishInterval) {
-      AppLogger.d('Skipping publish - too soon ($timeSinceLastPublish < $minPublishInterval)');
-      return false;
-    }
-
-    // Check distance moved
-    final distance = _locationService.getDistanceBetween(
-      _lastPublishedLocation!.latitude,
-      _lastPublishedLocation!.longitude,
-      location.latitude,
-      location.longitude,
+    return _publicationPolicy().shouldPublish(
+      location,
+      now: _now(),
+      elapsedSincePublication: _lastPublishElapsed == null
+          ? Duration.zero
+          : _monotonicNow() - _lastPublishElapsed!,
+      lastPublishedLocation: _lastPublishedLocation,
     );
-
-    if (distance < minPublishDistance) {
-      AppLogger.d('Skipping publish - too close ($distance < $minPublishDistance)');
-      return false;
-    }
-
-    AppLogger.d('Publishing location - moved ${distance.toInt()}m in ${timeSinceLastPublish}s');
-    return true;
   }
 
   /// Publish location update
@@ -164,9 +221,9 @@ class TrackingService {
   Future<void> _publishLocation(LocationUpdate location) async {
     try {
       await _sendLocationMessage(location);
-      AppLogger.i('Published location update');
+      AppLogger.i('Queued location update');
     } catch (e) {
-      AppLogger.e('Error publishing location: $e');
+      _reportError(e);
     }
   }
 
@@ -174,11 +231,15 @@ class TrackingService {
   ///
   /// Throws if the message cannot be handed to the message processor.
   Future<void> _sendLocationMessage(LocationUpdate location) async {
+    final generation = _generation;
     final deviceId = _settingsRepository.getDeviceId();
     final trackerId = _settingsRepository.getTrackerId();
 
     // Get current regions
     final inRegions = _geofencingService.getCurrentRegions();
+    final altitude = location.altitude;
+    final speedKmH = location.speedKmH;
+    final heading = location.heading;
 
     // Create location message
     final message = {
@@ -188,44 +249,46 @@ class TrackingService {
       'lon': location.longitude,
       'tst': location.timestampSeconds,
       'acc': location.accuracy.toInt(),
-      'alt': (location.altitude ?? 0).toInt(),
-      'vel': (location.speedKmH ?? 0).toInt(),
-      'cog': (location.heading ?? 0).toInt(),
-      'batt': _batteryService.batteryLevel,
+      if (altitude != null && altitude.isFinite) 'alt': altitude.toInt(),
+      if (speedKmH != null && speedKmH.isFinite && speedKmH >= 0)
+        'vel': speedKmH.toInt(),
+      if (heading != null && heading.isFinite && heading >= 0 && heading < 360)
+        'cog': heading.toInt(),
+      if (_batteryService.batteryLevel != null)
+        'batt': _batteryService.batteryLevel,
       if (inRegions.isNotEmpty) 'inregions': inRegions,
     };
 
     final topic = 'owntracks/$deviceId/$trackerId';
     await _messageProcessor.sendMessage(message, topic: topic);
 
-    _lastPublishTime = DateTime.now();
-    _lastPublishedLocation = location;
+    if (!_disposed && generation == _generation) {
+      _lastPublishElapsed = _monotonicNow();
+      _lastPublishedLocation = location;
+      _clearError();
+    }
   }
 
   /// Publish geofence transition
   Future<void> _publishTransition(GeofenceTransition transition) async {
-    try {
-      final deviceId = _settingsRepository.getDeviceId();
-      final trackerId = _settingsRepository.getTrackerId();
+    final deviceId = _settingsRepository.getDeviceId();
+    final trackerId = _settingsRepository.getTrackerId();
 
-      final message = {
-        '_type': 'transition',
-        'tid': trackerId.isNotEmpty ? trackerId : 'XX',
-        'event': transition.event == GeofenceEvent.enter ? 'enter' : 'leave',
-        'lat': transition.latitude,
-        'lon': transition.longitude,
-        'tst': transition.timestamp,
-        'desc': transition.region.displayDescription,
-        'wtst': transition.region.timestamp,
-      };
+    final message = {
+      '_type': 'transition',
+      'tid': trackerId.isNotEmpty ? trackerId : 'XX',
+      'event': transition.event == GeofenceEvent.enter ? 'enter' : 'leave',
+      'lat': transition.latitude,
+      'lon': transition.longitude,
+      'tst': transition.timestamp,
+      'desc': transition.region.displayDescription,
+      'wtst': transition.region.timestamp,
+    };
 
-      final topic = 'owntracks/$deviceId/$trackerId';
-      await _messageProcessor.sendMessage(message, topic: topic);
+    final topic = 'owntracks/$deviceId/$trackerId';
+    await _messageProcessor.sendMessage(message, topic: topic);
 
-      AppLogger.i('Published geofence transition');
-    } catch (e) {
-      AppLogger.e('Error publishing transition: $e');
-    }
+    AppLogger.i('Queued geofence transition');
   }
 
   /// Publish current location on demand
@@ -234,7 +297,14 @@ class TrackingService {
   /// Unlike the automatic tracking path this propagates failures, so a caller
   /// driving it from the UI can tell the user what went wrong. Throws
   /// [StateError] when the current position cannot be determined.
-  Future<void> publishCurrentLocation() async {
+  Future<void> publishCurrentLocation() {
+    return _manualPublication ??= _publishCurrentLocation().whenComplete(() {
+      _manualPublication = null;
+    });
+  }
+
+  Future<void> _publishCurrentLocation() async {
+    final generation = _generation;
     AppLogger.i('Publishing current location on demand');
 
     final location = await _locationService.getCurrentLocation();
@@ -246,16 +316,26 @@ class TrackingService {
       );
     }
 
+    if (!_acceptable(location)) {
+      throw StateError('Location fix is stale, inaccurate, mocked or invalid.');
+    }
+    if (_disposed || generation != _generation) {
+      throw StateError('Location publication cancelled.');
+    }
     await _sendLocationMessage(location);
-    AppLogger.i('Published location on demand');
+    AppLogger.i('Queued location on demand');
   }
 
   /// Get current tracking status
-  bool get isTracking => _locationSubscription != null;
+  bool get isTracking => _running;
 
   /// Clean up resources
   void dispose() {
+    _disposed = true;
+    _running = false;
+    _stopRevision++;
+    _generation++;
     _locationSubscription?.cancel();
-    _geofenceSubscription?.cancel();
+    _statusController.close();
   }
 }

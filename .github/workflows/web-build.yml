@@ -14,6 +14,7 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -27,24 +28,95 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.2'
           channel: stable
           cache: true
 
       - run: flutter pub get
 
-      # Tests run when the repo has any; a repo without tests must not fail
-      # the build for lacking them.
-      - name: flutter test (if present — non-blocking; the BUILD is this workflow's contract)
-        continue-on-error: true
+      - name: analyze
+        run: flutter analyze
+
+      - name: test
+        run: flutter test
+
+      - name: test browser storage and startup recovery
+        timeout-minutes: 10
+        run: flutter test --platform chrome test/browser/outbox_test.dart test/browser/bootstrap_recovery_test.dart
+
+      - name: install local MQTT broker
         run: |
-          if [ -d test ] && ls test/*_test.dart test/**/*_test.dart 2>/dev/null | head -1 >/dev/null; then
-            flutter test
-          else
-            echo "no tests present — skipping"
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mosquitto mosquitto-clients
+
+      - name: test MQTT broker delivery
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          broker_config="$(mktemp)"
+          broker_log="$(mktemp)"
+          broker_pid=""
+          cleanup() {
+            result=$?
+            trap - EXIT
+            if [ -n "$broker_pid" ]; then
+              kill "$broker_pid" 2>/dev/null || true
+              wait "$broker_pid" 2>/dev/null || true
+            fi
+            if [ "$result" -ne 0 ]; then
+              cat "$broker_log"
+            fi
+            rm -f "$broker_config" "$broker_log"
+            exit "$result"
+          }
+          trap cleanup EXIT
+          cat > "$broker_config" <<'CONFIG'
+          listener 28884 127.0.0.1
+          allow_anonymous true
+          persistence false
+          CONFIG
+          mosquitto -c "$broker_config" > "$broker_log" 2>&1 &
+          broker_pid=$!
+          ready=0
+          for attempt in {1..20}; do
+            if ! kill -0 "$broker_pid" 2>/dev/null; then
+              echo "Local MQTT broker exited before becoming ready" >&2
+              exit 1
+            fi
+            if timeout 1 mosquitto_pub -h 127.0.0.1 -p 28884 -q 1 -t owntracks/ci/readiness -n 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 0.25
+          done
+          if [ "$ready" -ne 1 ] || ! kill -0 "$broker_pid" 2>/dev/null; then
+            echo "Local MQTT broker did not acknowledge the readiness message" >&2
+            exit 1
           fi
+          flutter test --dart-define=MQTT_TEST_PORT=28884 test/integration/mqtt_broker_test.dart
+
+      - name: test native MQTT TLS
+        timeout-minutes: 10
+        run: bash tool/verify_mqtt_tls.sh
+
+      - name: test authenticated browser WSS
+        timeout-minutes: 10
+        run: bash tool/verify_mqtt_wss.sh
 
       - name: build web bundle
-        run: flutter build web --release --no-tree-shake-icons --base-href "/${{ env.APP_SLUG }}/"
+        env:
+          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
+        run: |
+          if [ -z "$MAPS_API_KEY" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              flutter build web --release --no-tree-shake-icons --base-href "/${APP_SLUG}/"
+              exit 0
+            fi
+            echo "MAPS_API_KEY must be configured for a deployable map build" >&2
+            exit 1
+          fi
+          flutter build web --release --no-tree-shake-icons --base-href "/${APP_SLUG}/" --dart-define="MAPS_API_KEY=$MAPS_API_KEY"
 
       - name: stamp build provenance
         run: |
@@ -53,6 +125,7 @@ jobs:
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > build/web/build-info.json
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: web-${{ env.APP_SLUG }}
           path: build/web

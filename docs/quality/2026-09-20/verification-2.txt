@@ -1,0 +1,77 @@
+OwnTrack repair iteration 2 — 2026-09-20 America/Denver
+Base HEAD e59d7fcaa772faae674eef73172a28be462328d4; working tree uncommitted.
+Flutter commands were run sequentially. No deployment or hosted CI run.
+
+Final default suite — exit 0
+flutter test --reporter expanded
+00:15 +293 ~1: All tests passed!
+The one skip is the optional broker integration, executed separately below.
+Full local output: /tmp/owntrack-iteration2-tests.log
+
+Final static analysis — exit 0
+flutter analyze
+No issues found! (ran in 4.2s)
+Full local output: /tmp/owntrack-iteration2-analyze.log
+
+Real Chrome storage lifecycle — exit 0
+flutter test --platform chrome test/browser/outbox_test.dart
+00:00 +6: All tests passed!
+Exercises actual IndexedDB, blocked upgrades, retry, close/open races and CAS.
+Full local output: /tmp/owntrack-iteration2-browser.log
+
+Live loopback MQTT — exit 0
+flutter test --dart-define=MQTT_TEST_PORT=28884 test/integration/mqtt_broker_test.dart
+00:00 +1: All tests passed!
+Mosquitto 2.1.2 on 127.0.0.1:28884, anonymous local-only isolated test listener.
+QoS 1 readiness publication, acknowledgement and subscribed location receipt.
+EXIT cleanup stopped the broker; broker log records termination.
+Full local output: /tmp/owntrack-iteration2-broker.log
+Broker output: /tmp/owntrack-iteration2-mosquitto.log
+Initial local wrapper readiness check failed because installed mosquitto_pub
+does not support -W. Replaced only the local wrapper timeout with Python's
+subprocess timeout; rerun passed. CI uses Ubuntu's timeout utility.
+
+Web/Wasm release compile — exit 0
+flutter build web --wasm --release --no-tree-shake-icons --base-href /owntrack/
+Compiling lib/main.dart for the Web... 36.4s
+Built build/web
+Full local output: /tmp/owntrack-iteration2-wasm.log
+No map key provided: compile success does not establish live tile loading.
+Native configuration/dependencies unchanged; native builds not repeated here.
+
+Other validation
+- Workflow YAML parsed; each shell step passed bash -n.
+- Changed Dart files formatted with installed Dart SDK.
+- git diff --check passed.
+- Final independent review confirmed both final findings resolved.
+- Final flutter devices discovery: macOS and Chrome only; no wireless devices.
+  /tmp/owntrack-iteration2-devices.log
+
+Observed regression failures before corresponding fixes
+- Tracking restart: expected two publications; only one (old interval baseline).
+  /tmp/owntrack-iteration2-tracking-red.log
+- Conflicting secure/legacy key silently accepted migration; did not throw.
+  /tmp/owntrack-iteration2-recovery-red.log
+- Restored legacy queue lost while durable records existed; success hid blocked
+  records. /tmp/owntrack-iteration2-integrity-red.log
+- Browser closed-store, blocked-upgrade and late-open scenarios failed (four).
+  /tmp/owntrack-iteration2-browser-red.log
+- Failed geofence acceptance attempted once instead of retrying original fix.
+  /tmp/owntrack-iteration2-geofence-red.log
+- Eight preference setters ignored false writes; fractional intervals truncated.
+  /tmp/owntrack-iteration2-settings-red.log
+- Three identification save UI scenarios failed (uncaught errors/duplicate save).
+  /tmp/owntrack-iteration2-identification-red.log
+- Discarded later record still published after earlier ack: actual [1, 2],
+  expected [1]. /tmp/owntrack-iteration2-discard-red.log
+- Overlapping-region acceptance failure lost the second region's enter/exit
+  history (two cases). /tmp/owntrack-iteration2-overlap-red.log
+
+Test harness corrections
+The first outbox widget run stalled due to setup crossing real/fake async zones;
+fixture initialization moved into each test and cleanup unmounts before close.
+The narrow/large-text test now scrolls to materialize its lazy list row before
+checking overflow. The final complete suite above includes both corrections.
+
+No physical-device tracking, real keychain, certificate rejection, authenticated
+WSS, live Recorder/native encryption or screen-reader acceptance is implied.

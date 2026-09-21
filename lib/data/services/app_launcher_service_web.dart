@@ -25,7 +25,9 @@ class AppLauncherServiceWeb {
     try {
       // Encode settings into a deep link
       final deepLinkUrl = _buildDeepLinkUrl();
-      AppLogger.i('Attempting to launch app with URL: $deepLinkUrl');
+      AppLogger.i(
+        'Attempting to launch OwnTracks with nonsecret configuration',
+      );
 
       // Try to launch the app
       final uri = Uri.parse(deepLinkUrl);
@@ -57,7 +59,7 @@ class AppLauncherServiceWeb {
       await _showAppStoreOptions();
       return true;
     } catch (e) {
-      AppLogger.e('Error launching app: $e');
+      AppLogger.e('Unable to launch OwnTracks');
       await _showAppStoreOptions();
       return false;
     }
@@ -71,22 +73,8 @@ class AppLauncherServiceWeb {
   }
 
   /// Encode current settings into a map
-  Map<String, dynamic> _encodeSettings() {
-    return {
-      'connectionMode': _settingsRepository.getConnectionMode(),
-      'deviceId': _settingsRepository.getDeviceId(),
-      'trackerId': _settingsRepository.getTrackerId(),
-      'monitoringMode': _settingsRepository.getMonitoringMode(),
-      'mqttHost': _settingsRepository.getMqttHost(),
-      'mqttPort': _settingsRepository.getMqttPort(),
-      'mqttUseTls': _settingsRepository.getMqttUseTls(),
-      'mqttUsername': _settingsRepository.getMqttUsername(),
-      'mqttPassword': _settingsRepository.getMqttPassword(),
-      'mqttClientId': _settingsRepository.getMqttClientId(),
-      'httpUrl': _settingsRepository.getHttpUrl(),
-      'encryptionKey': _settingsRepository.getEncryptionKey(),
-    };
-  }
+  Map<String, dynamic> _encodeSettings() =>
+      _settingsRepository.shareableConfiguration();
 
   /// Show app store options when the app is not installed
   Future<void> _showAppStoreOptions() async {

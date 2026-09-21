@@ -1,0 +1,148 @@
+OwnTrack repair iteration 3 — 2026-09-20 America/Denver
+Base HEAD e59d7fcaa772faae674eef73172a28be462328d4; working tree uncommitted.
+Flutter commands run sequentially. No deployment or hosted CI run.
+
+Final default VM/widget suite — exit 0
+flutter test --reporter expanded
+00:14 +333 ~3: All tests passed!
+Three optional integrations are skipped by default: plaintext broker and two
+TLS cases. Both TLS cases ran separately below; the plaintext broker result
+from iteration 2 is historical, not a new run in this iteration.
+/tmp/owntrack-iteration3-tests.log
+
+Final static analysis — exit 0
+flutter analyze
+No issues found! (ran in 3.5s)
+/tmp/owntrack-iteration3-analyze-final.log
+An earlier pass reported five style infos; braces and forwarding constructors
+were corrected without behavior changes. /tmp/owntrack-iteration3-analyze.log
+
+Observed failing-before regressions
+- Credential migration initially raised an unrecoverable generic conflict.
+  Nine recovery regressions failed before the typed conflict/resolver existed.
+  /tmp/owntrack-iteration3-credentials-red.log
+- The first resolver implementation overwrote a later credential changed while
+  an earlier keychain write was pending. Per-key revalidation fixes this race.
+  /tmp/owntrack-iteration3-credentials.log
+- Actual Mosquitto WSS connections failed with the package's default multiple
+  WebSocket protocols. A TLS-verified raw handshake reproduced the refusal;
+  selecting the single mqtt protocol allowed HTTP 101 and real MQTT delivery.
+  /tmp/owntrack-iteration3-wss.log
+- Fifteen iOS permission cases failed: foreground permission was treated as
+  background access and the request path never performed an Always upgrade.
+  /tmp/owntrack-iteration3-permissions-red.log
+- Actual SharedPreferences cleared its cache when platform removal returned
+  false. Startup retry incorrectly succeeded while plaintext remained on disk.
+  /tmp/owntrack-iteration3-review-red.log
+- Old MQTT disconnect and acknowledgement callbacks corrupted a replacement
+  connection and prematurely completed its pending publication (two failures).
+  /tmp/owntrack-iteration3-review-red.log
+- Three widget regressions could not find the Open Settings recovery action
+  after background permission was permanently denied.
+  /tmp/owntrack-iteration3-permission-ui-red.log
+- Two actual Chrome regressions lost an already migrated encryption key on
+  bootstrap retry after outbox failure or a later credential-cleanup failure.
+  /tmp/owntrack-iteration3-browser-recovery-red.log
+- A real TLS handshake completed after the service's fifteen-second deadline
+  left the abandoned connection open. Peer closure timed out twelve seconds
+  after completing the delayed handshake.
+  /tmp/owntrack-iteration3-late-tls-red.log
+
+Test harness corrections
+- Recovery UI tests now settle after scrolling to materialize lazy radio rows.
+  Bootstrap's retry callback was also fixed: setState must not return a Future.
+- mqtt_client exposes websocketProtocols as a setter only. An invalid getter
+  assertion was removed; real WSS delivery verifies the production fix.
+- An initial WSS run ended with a shell offset error after its executing script
+  was edited. Subsequent fixture scripts were left unchanged while running.
+- A later WSS run passed all six tests but failed process-group cleanup on
+  macOS with PermissionError. Cleanup now inspects exact group membership,
+  handles individual-process termination and verifies no live group remains.
+  The final runner exited successfully; denied cleanup is still a failure.
+  /tmp/owntrack-iteration3-wss-final.log (failed cleanup)
+  /tmp/owntrack-iteration3-wss-final-2.log (six passed, exit 0)
+
+Focused permission regressions — exit 0
+flutter test test/data/services/permission_service_test.dart
+21 passed; mocked plugin authorization results, no installed-device prompts.
+/tmp/owntrack-iteration3-permissions-green.log
+
+Final focused credential regressions — exit 0
+flutter test test/bootstrap_test.dart test/data/repositories/credential_recovery_test.dart test/presentation/screens/settings/credential_conflict_screen_test.dart
+19 passed, including durable-preferences reload after failed plaintext removal.
+/tmp/owntrack-iteration3-recovery-final.log
+
+MQTT ownership regressions — exit 0
+flutter test test/data/services/mqtt_service_test.dart
+15 passed, including stale callbacks, late connect completion and packet-ID reuse.
+/tmp/owntrack-iteration3-mqtt-green.log
+
+Permission recovery UI — exit 0
+flutter test test/presentation/screens/settings/tracking_settings_screen_test.dart
+8 passed; actual settings screen, provider overrides, Open Settings invocation,
+failed launch retry and lifecycle return with newly granted authorization.
+/tmp/owntrack-iteration3-permission-ui-green.log
+
+Final browser storage and startup recovery — exit 0
+flutter test --platform chrome test/browser/outbox_test.dart test/browser/bootstrap_recovery_test.dart
+8 passed: six real IndexedDB tests and two actual browser bootstrap retries.
+/tmp/owntrack-iteration3-browser-final.log
+
+Initial real secure transport checks — exit 0
+bash tool/verify_mqtt_tls.sh
+1 passed: untrusted issuer, hostname mismatch, incorrect credentials, real
+QoS 1 publish/receive and reconnect using the production native MQTT adapter.
+/tmp/owntrack-iteration3-tls.log
+bash tool/verify_mqtt_wss.sh
+6 passed: ws URL/TLS-disabled refusal, authenticated QoS 1 publish/receive,
+incorrect credentials, unlisted certificate rejection, broker-eviction recovery.
+/tmp/owntrack-iteration3-wss-green.log
+Both use isolated loopback Mosquitto and temporary certificates/credentials.
+Native trust changes apply only in the Dart test isolate. WSS trusts one fixture
+leaf SPKI in Flutter's temporary Chrome profile and rejects a distinct leaf.
+Neither modifies OS trust nor proves production broker deployment trust.
+
+Final native TLS integration — exit 0
+bash tool/verify_mqtt_tls.sh
+2 passed: the original issuer/hostname/auth/QoS/reconnect check plus a real TLS
+handshake completed only after the service's actual fifteen-second deadline.
+The late socket closes after its underlying attempt finishes; no application
+payload or connected state is emitted after the timeout.
+/tmp/owntrack-iteration3-tls-final-2.log
+
+Runner cancellation validation (independent reviewer)
+Both extracted Python controllers passed real-process harnesses for success,
+failure status propagation, SIGTERM, resistant children/descendants, timeout
+cleanup and group-signal PermissionError fallback. Denying both group and
+individual termination still produces failure, never a false green result.
+No application/browser processes were used in these cancellation harnesses.
+
+Release web/Wasm compile — exit 0
+flutter build web --wasm --release --no-tree-shake-icons --base-href /owntrack/
+Compiling lib/main.dart for the Web... 35.5s
+Built build/web
+/tmp/owntrack-iteration3-wasm.log
+No map key was provided; live tile loading was not tested.
+
+Unsigned iOS release compile — exit 0
+flutter build ios --release --no-codesign
+Xcode build done. 26.6s
+Built build/ios/iphoneos/Runner.app (21.3MB)
+/tmp/owntrack-iteration3-ios.log
+The existing flutter_background_service_ios plugin emits a Swift Package
+Manager adoption warning; Flutter used CocoaPods fallback as needed.
+No app installation, physical prompt, keychain or background test is implied.
+Android/macOS native configuration unchanged; prior builds were not repeated.
+
+Other final checks
+- Workflow YAML and all ten shell steps parsed successfully.
+- Both broker scripts passed bash -n; four embedded Python blocks per script
+  compiled. Ruby syntax check passed for ios/Podfile.
+- Changed Dart files formatted; final git diff --check passed.
+- flutter devices again found only macOS and Chrome; no wireless devices.
+  /tmp/owntrack-iteration3-devices.log
+- No commit, push, deployment, distribution signing or hosted CI run occurred.
+
+Still unverified: physical Android/iPhone lifecycle and energy behavior,
+installed native keychain restart, deployed normal-PKI WSS, live bidirectional
+Recorder/native encryption and complete accessibility acceptance.

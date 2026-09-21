@@ -22,6 +22,21 @@ class LocationService {
 
   StreamSubscription<Position>? _positionSubscription;
   Position? _lastPosition;
+  Future<void> _lifecycle = Future<void>.value();
+  bool _disposed = false;
+  int? _activeMode;
+
+  Future<T> _serialize<T>(Future<T> Function() action) {
+    final result = Completer<T>();
+    _lifecycle = _lifecycle.then((_) async {
+      try {
+        result.complete(await action());
+      } catch (error, stack) {
+        result.completeError(error, stack);
+      }
+    });
+    return result.future;
+  }
 
   final StreamController<LocationUpdate> _locationController =
       StreamController<LocationUpdate>.broadcast();
@@ -81,7 +96,7 @@ class LocationService {
 
       _lastPosition = position;
       final update = _positionToLocationUpdate(position);
-      AppLogger.d('Got current location: ${position.latitude}, ${position.longitude}');
+      AppLogger.d('Acquired current location');
       return update;
     } catch (e) {
       AppLogger.e('Error getting current location: $e');
@@ -109,13 +124,15 @@ class LocationService {
         return await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 30),
           ),
         );
       } on PermissionDeniedException {
         if (attempt >= maxAttempts) rethrow;
 
         final settled = await checkPermission();
-        final granted = settled == LocationPermission.always ||
+        final granted =
+            settled == LocationPermission.always ||
             settled == LocationPermission.whileInUse;
         if (!granted) rethrow;
 
@@ -129,7 +146,19 @@ class LocationService {
   }
 
   /// Start location tracking based on monitoring mode
-  Future<bool> startTracking() async {
+  Future<bool> startTracking() => _serialize(_startTracking);
+
+  Future<bool> _startTracking() async {
+    if (_disposed) return false;
+    final monitoringMode = _settingsRepository.getMonitoringMode();
+    if (_positionSubscription != null && _activeMode == monitoringMode) {
+      return true;
+    }
+    await _stopTracking();
+    if (monitoringMode == AppConstants.monitoringModeQuiet ||
+        monitoringMode == AppConstants.monitoringModeManual) {
+      return true;
+    }
     try {
       // Web browser geolocation doesn't have a "service enabled" concept
       // Skip check on web to avoid false negatives
@@ -155,7 +184,7 @@ class LocationService {
         return false;
       }
 
-      final monitoringMode = _settingsRepository.getMonitoringMode();
+      if (_disposed) return false;
       final settings = _getLocationSettings(monitoringMode);
 
       if (PlatformUtils.isWeb) {
@@ -164,13 +193,23 @@ class LocationService {
         AppLogger.i('Starting location tracking with mode: $monitoringMode');
       }
 
-      _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: settings,
-      ).listen(
-        _onLocationUpdate,
-        onError: _onLocationError,
-      );
+      _positionSubscription =
+          Geolocator.getPositionStream(locationSettings: settings).listen(
+            _onLocationUpdate,
+            onError: _onLocationError,
+            onDone: () {
+              if (!_disposed && _positionSubscription != null) {
+                _onLocationError(
+                  StateError(
+                    'Location updates stopped. Restart tracking to retry.',
+                  ),
+                );
+              }
+            },
+            cancelOnError: true,
+          );
 
+      _activeMode = monitoringMode;
       return true;
     } catch (e) {
       AppLogger.e('Error starting location tracking: $e');
@@ -179,65 +218,64 @@ class LocationService {
   }
 
   /// Stop location tracking
-  Future<void> stopTracking() async {
-    AppLogger.i('Stopping location tracking');
-    await _positionSubscription?.cancel();
+  Future<void> stopTracking() => _serialize(_stopTracking);
+
+  Future<void> _stopTracking() async {
+    final subscription = _positionSubscription;
     _positionSubscription = null;
+    _activeMode = null;
+    await subscription?.cancel();
   }
 
   /// Get location settings based on monitoring mode
   LocationSettings _getLocationSettings(int monitoringMode) {
-    switch (monitoringMode) {
-      case AppConstants.monitoringModeQuiet:
-        // Quiet mode - no tracking
-        return const LocationSettings(
-          accuracy: LocationAccuracy.low,
-          distanceFilter: 1000, // 1km
-        );
-
-      case AppConstants.monitoringModeManual:
-        // Manual mode - only on demand
-        return const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 0,
-        );
-
-      case AppConstants.monitoringModeSignificant:
-        // Significant changes - balance between accuracy and battery
-        return const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-          distanceFilter: 100, // 100m
-          timeLimit: Duration(minutes: 5),
-        );
-
-      case AppConstants.monitoringModeMove:
-        // Move mode - high accuracy, frequent updates
-        return const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          distanceFilter: 10, // 10m
-          timeLimit: Duration(seconds: 30),
-        );
-
-      default:
-        // Default to significant changes
-        return const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-          distanceFilter: 100,
-        );
+    final moving = monitoringMode == AppConstants.monitoringModeMove;
+    final accuracy = moving ? LocationAccuracy.best : LocationAccuracy.medium;
+    // Distance filtering is a publication policy. A stationary stream must
+    // remain capable of producing fresh fixes for the heartbeat.
+    if (PlatformUtils.isAndroid) {
+      return AndroidSettings(
+        accuracy: accuracy,
+        distanceFilter: 0,
+        intervalDuration: Duration(seconds: moving ? 10 : 60),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'OwnTrack location tracking',
+          notificationText: 'Location sharing is active',
+          enableWakeLock: true,
+        ),
+      );
     }
+    if (PlatformUtils.isIOS ||
+        (!PlatformUtils.isWeb && PlatformUtils.isDesktop)) {
+      return AppleSettings(
+        accuracy: accuracy,
+        distanceFilter: 0,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: true,
+        allowBackgroundLocationUpdates: PlatformUtils.isIOS,
+      );
+    }
+    return LocationSettings(accuracy: accuracy, distanceFilter: 0);
   }
 
   /// Handle location update
   void _onLocationUpdate(Position position) {
     _lastPosition = position;
     final update = _positionToLocationUpdate(position);
-    AppLogger.d('Location update: ${position.latitude}, ${position.longitude}, acc: ${position.accuracy}m');
+    if (_disposed) return;
+    AppLogger.d('Received location update');
     _locationController.add(update);
   }
 
   /// Handle location error
   void _onLocationError(Object error) {
-    AppLogger.e('Location error: $error');
+    if (_disposed) return;
+    final subscription = _positionSubscription;
+    _positionSubscription = null;
+    _activeMode = null;
+    unawaited(subscription?.cancel());
+    AppLogger.e('Location stream failed');
+    _locationController.addError(error);
   }
 
   /// Convert Position to LocationUpdate
@@ -271,7 +309,9 @@ class LocationService {
 
   /// Clean up resources
   void dispose() {
+    _disposed = true;
     _positionSubscription?.cancel();
+    _positionSubscription = null;
     _locationController.close();
   }
 }

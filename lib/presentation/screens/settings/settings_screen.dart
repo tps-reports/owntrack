@@ -1,100 +1,128 @@
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:owntrack/core/utils/platform_utils.dart';
-import 'package:owntrack/domain/providers/app_providers.dart';
+import 'package:owntrack/presentation/screens/settings/connection_settings_screen.dart';
+import 'package:owntrack/presentation/screens/settings/tracking_settings_screen.dart';
+import 'package:owntrack/presentation/screens/settings/identification_settings_screen.dart';
+import 'package:owntrack/presentation/screens/waypoints/waypoints_screen.dart';
+import 'package:owntrack/presentation/screens/regions/regions_screen.dart';
+import 'package:owntrack/presentation/screens/settings/outbox_screen.dart';
 
-/// Settings screen for app configuration
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
-
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: ListView(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.wifi),
-            title: const Text('Connection'),
-            subtitle: const Text('MQTT and HTTP settings'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: Navigate to connection settings
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.location_on),
-            title: const Text('Location'),
-            subtitle: const Text('Tracking and reporting settings'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: Navigate to location settings
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.notifications),
-            title: const Text('Notifications'),
-            subtitle: const Text('Notification preferences'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: Navigate to notification settings
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.security),
-            title: const Text('Security'),
-            subtitle: const Text('Encryption and privacy'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: Navigate to security settings
-            },
-          ),
-          const Divider(),
-          if (PlatformUtils.isWeb) ...[
-            ListTile(
-              leading: const Icon(Icons.phone_android),
-              title: const Text('Open in Mobile App'),
-              subtitle: const Text('Launch the mobile app with your settings'),
-              trailing: const Icon(Icons.open_in_new),
-              onTap: () async {
-                final appLauncher = ref.read(appLauncherServiceProvider);
-                final scaffoldMessenger = ScaffoldMessenger.of(context);
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Settings')),
+    body: const SettingsContent(),
+  );
+}
 
-                // Show loading indicator
-                scaffoldMessenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('Launching mobile app...'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-
-                final success = await appLauncher.launchAppWithSettings();
-
-                if (!success) {
-                  scaffoldMessenger.hideCurrentSnackBar();
-                  scaffoldMessenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('Unable to launch app. Please try again.'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-            ),
-            const Divider(),
-          ],
-          ListTile(
-            leading: const Icon(Icons.info),
-            title: const Text('About'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: Show about dialog
-            },
+/// Shared settings navigation for the map tab and the direct settings route.
+class SettingsContent extends StatelessWidget {
+  const SettingsContent({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.outbox),
+          title: const Text('Outbox'),
+          subtitle: const Text('Review, export and retry queued messages'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(builder: (_) => const OutboxScreen()),
           ),
-        ],
-      ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.wifi),
+          title: const Text('Connection'),
+          subtitle: const Text('MQTT and HTTP settings'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const ConnectionSettingsScreen(),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.location_on),
+          title: const Text('Tracking'),
+          subtitle: const Text('Location tracking preferences'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const TrackingSettingsScreen(),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.person),
+          title: const Text('Identification'),
+          subtitle: const Text('Device and tracker ID'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const IdentificationSettingsScreen(),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.place),
+          title: const Text('Waypoints'),
+          subtitle: const Text('Manage saved waypoints'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const WaypointsScreen()),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.location_searching),
+          title: const Text('Regions'),
+          subtitle: const Text('Manage geofence regions'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const RegionsScreen()),
+            );
+          },
+        ),
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.info),
+          title: const Text('About'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            _showAboutDialog(context);
+          },
+        ),
+      ],
+    );
+  }
+
+  void _showAboutDialog(BuildContext context) {
+    showAboutDialog(
+      context: context,
+      applicationName: 'OwnTracks',
+      applicationVersion: '1.0.0',
+      applicationLegalese: '© 2025 OwnTracks\nMIT License',
+      children: [
+        const SizedBox(height: 16),
+        const Text(
+          'A unified Flutter implementation of OwnTracks for Android and iOS.',
+        ),
+      ],
     );
   }
 }

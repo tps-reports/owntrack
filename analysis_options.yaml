@@ -4,9 +4,6 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
-  plugins:
-    - custom_lint
-
   errors:
     invalid_annotation_target: ignore
 
@@ -40,5 +37,5 @@ linter:
     prefer_if_null_operators: true
     prefer_null_aware_operators: true
 
-custom_lint:
-  enable_all_lint_rules: false
+plugins:
+  riverpod_lint: 3.1.0

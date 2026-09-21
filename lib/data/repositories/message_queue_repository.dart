@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
-
 import 'package:owntrack/data/datasources/local/preferences/settings_local_datasource.dart';
+import 'package:owntrack/data/datasources/outbox/outbox_store.dart';
 
-/// Queued message model
 class QueuedMessage {
   final int id;
   final String topic;
@@ -10,7 +10,10 @@ class QueuedMessage {
   final int qos;
   final int timestamp;
   final int retryCount;
+  final int retryAt;
 
+  /// A missing identity marks legacy records as blocked, never implicitly rerouted.
+  final String? destination;
   const QueuedMessage({
     required this.id,
     required this.topic,
@@ -18,139 +21,272 @@ class QueuedMessage {
     required this.qos,
     required this.timestamp,
     this.retryCount = 0,
+    this.retryAt = 0,
+    this.destination,
   });
 
-  factory QueuedMessage.fromJson(Map<String, dynamic> json) {
+  factory QueuedMessage.fromJson(Object? value) {
+    if (value is! Map<String, dynamic> ||
+        value['id'] is! int ||
+        value['topic'] is! String ||
+        value['payload'] is! String ||
+        value['qos'] is! int ||
+        value['timestamp'] is! int ||
+        (value['retryCount'] != null && value['retryCount'] is! int) ||
+        (value['retryAt'] != null && value['retryAt'] is! int) ||
+        (value['destination'] != null && value['destination'] is! String)) {
+      throw const FormatException(
+        'Outbox contains an invalid record; original storage retained.',
+      );
+    }
+    final id = value['id'] as int;
+    final qos = value['qos'] as int;
+    if (id < 1 || qos < 0 || qos > 2) {
+      throw const FormatException('Invalid outbox identity or QoS.');
+    }
     return QueuedMessage(
-      id: json['id'] as int,
-      topic: json['topic'] as String,
-      payload: json['payload'] as String,
-      qos: json['qos'] as int,
-      timestamp: json['timestamp'] as int,
-      retryCount: json['retryCount'] as int? ?? 0,
+      id: id,
+      topic: value['topic'] as String,
+      payload: value['payload'] as String,
+      qos: qos,
+      timestamp: value['timestamp'] as int,
+      retryCount: value['retryCount'] as int? ?? 0,
+      retryAt: value['retryAt'] as int? ?? 0,
+      destination: value['destination'] as String?,
     );
   }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'topic': topic,
-      'payload': payload,
-      'qos': qos,
-      'timestamp': timestamp,
-      'retryCount': retryCount,
-    };
-  }
-
-  QueuedMessage copyWith({
-    int? id,
-    String? topic,
-    String? payload,
-    int? qos,
-    int? timestamp,
-    int? retryCount,
-  }) {
-    return QueuedMessage(
-      id: id ?? this.id,
-      topic: topic ?? this.topic,
-      payload: payload ?? this.payload,
-      qos: qos ?? this.qos,
-      timestamp: timestamp ?? this.timestamp,
-      retryCount: retryCount ?? this.retryCount,
-    );
-  }
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'topic': topic,
+    'payload': payload,
+    'qos': qos,
+    'timestamp': timestamp,
+    'retryCount': retryCount,
+    'retryAt': retryAt,
+    'destination': destination,
+  };
+  QueuedMessage copyWith({int? retryCount, int? retryAt}) => QueuedMessage(
+    id: id,
+    topic: topic,
+    payload: payload,
+    qos: qos,
+    timestamp: timestamp,
+    retryCount: retryCount ?? this.retryCount,
+    retryAt: retryAt ?? this.retryAt,
+    destination: destination,
+  );
 }
 
-/// Repository for message queue with retry logic
+/// Commits acceptance and acknowledgement before exposing the updated snapshot.
 class MessageQueueRepository {
-  static const String _queueKey = 'message_queue_storage';
+  static const _queueKey = 'message_queue_storage';
+  final OutboxStore _store;
+  List<QueuedMessage> _messages = [];
+  Future<void> _writes = Future.value();
+  final _changes = StreamController<int>.broadcast();
+  bool _closed = false;
+  MessageQueueRepository._(this._store);
+  Stream<int> get changes => _changes.stream;
 
-  final SettingsLocalDataSource _localDataSource;
-  final Map<int, QueuedMessage> _queue = {};
-  int _nextId = 1;
-
-  MessageQueueRepository(this._localDataSource) {
-    _loadQueue();
+  static List<QueuedMessage> _decode(String raw) {
+    final snapshot = jsonDecode(raw);
+    final decoded = snapshot is Map<String, dynamic> && snapshot['version'] == 1
+        ? snapshot['messages']
+        : snapshot;
+    if (decoded is! List) {
+      throw const FormatException('Invalid outbox snapshot.');
+    }
+    final messages = decoded.map(QueuedMessage.fromJson).toList();
+    if (messages.map((m) => m.id).toSet().length != messages.length) {
+      throw const FormatException('Duplicate outbox identity.');
+    }
+    return messages;
   }
 
-  /// Load queue from storage
-  void _loadQueue() {
-    final jsonString = _localDataSource.getString(_queueKey);
-    if (jsonString != null && jsonString.isNotEmpty) {
+  static Future<MessageQueueRepository> open(
+    SettingsLocalDataSource preferences, {
+    required OutboxStore store,
+  }) async {
+    final repository = MessageQueueRepository._(store);
+    try {
+      final legacy = preferences.getString(_queueKey);
+      final migrated = legacy == null ? <QueuedMessage>[] : _decode(legacy);
+      var raw = await store.read();
+      if (raw == null) {
+        final snapshot = jsonEncode(migrated.map((m) => m.toJson()).toList());
+        await store.compareAndSet(null, snapshot);
+        raw = await store.read();
+      }
+      repository._messages = _decode(raw!);
+      if (migrated.isNotEmpty) {
+        await repository._mutate((messages, nextId) {
+          String contents(QueuedMessage message) =>
+              jsonEncode(message.toJson()..remove('id'));
+          final existing = <String, int>{};
+          for (final message in messages) {
+            final key = contents(message);
+            existing[key] = (existing[key] ?? 0) + 1;
+          }
+          for (final message in migrated) {
+            final key = contents(message);
+            final count = existing[key] ?? 0;
+            if (count == 0) {
+              messages.add(
+                QueuedMessage.fromJson({...message.toJson(), 'id': nextId++}),
+              );
+            } else {
+              existing[key] = count - 1;
+            }
+          }
+        });
+      }
+      if (preferences.containsKey(_queueKey) &&
+          !await preferences.remove(_queueKey)) {
+        throw StateError('Cannot finalize outbox migration. Retry startup.');
+      }
+      return repository;
+    } catch (_) {
+      await store.close();
+      rethrow;
+    }
+  }
+
+  Future<T> _mutate<T>(T Function(List<QueuedMessage>, int) change) {
+    final result = Completer<T>();
+    _writes = _writes.then((_) async {
       try {
-        final List<dynamic> jsonList = json.decode(jsonString);
-        for (final json in jsonList) {
-          final message = QueuedMessage.fromJson(json as Map<String, dynamic>);
-          _queue[message.id] = message;
-          if (message.id >= _nextId) {
-            _nextId = message.id + 1;
+        if (_closed) throw StateError('Outbox is closed.');
+        for (var attempt = 0; attempt < 20; attempt++) {
+          final raw = await _store.read();
+          final candidate = _decode(raw!);
+          final snapshot = jsonDecode(raw);
+          final previousNextId = snapshot is Map<String, dynamic>
+              ? snapshot['nextId']
+              : null;
+          if (previousNextId != null &&
+              (previousNextId is! int || previousNextId < 1)) {
+            throw const FormatException('Invalid outbox sequence.');
+          }
+          var nextId = previousNextId as int? ?? 1;
+          for (final message in candidate) {
+            if (message.id >= nextId) nextId = message.id + 1;
+          }
+          final value = change(candidate, nextId);
+          for (final message in candidate) {
+            if (message.id >= nextId) nextId = message.id + 1;
+          }
+          final encoded = jsonEncode({
+            'version': 1,
+            'nextId': nextId,
+            'messages': candidate.map((m) => m.toJson()).toList(),
+          });
+          if (candidate.length > 10000 ||
+              utf8.encode(encoded).length > 20 * 1024 * 1024) {
+            throw StateError(
+              'Outbox is full. Restore delivery before accepting more locations.',
+            );
+          }
+          if (await _store.compareAndSet(raw, encoded)) {
+            _messages = candidate;
+            _changes.add(size);
+            result.complete(value);
+            return;
           }
         }
-      } catch (e) {
-        // Handle parsing errors
+        throw StateError(
+          'Outbox is busy in another session. Retry the operation.',
+        );
+      } catch (error, stack) {
+        result.completeError(error, stack);
       }
-    }
+    });
+    return result.future;
   }
 
-  /// Save queue to storage
-  Future<void> _saveQueue() async {
-    final jsonList = _queue.values.map((m) => m.toJson()).toList();
-    final jsonString = json.encode(jsonList);
-    await _localDataSource.setString(_queueKey, jsonString);
-  }
-
-  /// Add message to queue
-  Future<int> enqueue(String topic, String payload, {int qos = 1}) async {
-    final message = QueuedMessage(
-      id: _nextId++,
-      topic: topic,
-      payload: payload,
-      qos: qos,
-      timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+  Future<int> enqueue(
+    String topic,
+    String payload, {
+    int qos = 1,
+    String? destination,
+  }) => _mutate((messages, nextId) {
+    if (qos < 0 || qos > 2) throw ArgumentError.value(qos, 'qos');
+    final id = nextId;
+    messages.add(
+      QueuedMessage(
+        id: id,
+        topic: topic,
+        payload: payload,
+        qos: qos,
+        timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        destination: destination,
+      ),
     );
-    _queue[message.id] = message;
-    await _saveQueue();
-    return message.id;
+    return id;
+  });
+  QueuedMessage? peek() => _messages.isEmpty ? null : _messages.first;
+
+  /// Refresh through the same serialized transaction path as writes so another
+  /// tab's commits cannot overwrite this session's newer in-flight snapshot.
+  Future<void> refresh() => _mutate((messages, nextId) {});
+  Future<void> dequeue(int id) => _mutate((messages, nextId) {
+    messages.removeWhere((m) => m.id == id);
+  });
+  Future<void> incrementRetry(int id, {int retryAt = 0}) =>
+      _mutate((messages, nextId) {
+        final index = messages.indexWhere((m) => m.id == id);
+        if (index >= 0) {
+          messages[index] = messages[index].copyWith(
+            retryCount: messages[index].retryCount + 1,
+            retryAt: retryAt,
+          );
+        }
+      });
+  List<QueuedMessage> getAllMessages() => List.unmodifiable(_messages);
+
+  /// Export the stored envelopes without decrypting or redirecting them.
+  Future<String> exportMessages(Set<int> ids) {
+    final selected = Set<int>.of(ids);
+    return _mutate(
+      (messages, nextId) => jsonEncode({
+        'format': 'owntrack-outbox-export',
+        'version': 1,
+        'messages': messages
+            .where((message) => selected.contains(message.id))
+            .map((message) => message.toJson())
+            .toList(),
+      }),
+    );
   }
 
-  /// Get next message from queue
-  QueuedMessage? peek() {
-    if (_queue.isEmpty) return null;
-    // Get oldest message (lowest timestamp)
-    return _queue.values.reduce((a, b) => a.timestamp < b.timestamp ? a : b);
+  /// The confirmation applies only to its snapshot of selected IDs. Messages
+  /// accepted while the user reviews it must survive.
+  Future<int> discardMessages(Set<int> ids) {
+    final selected = Set<int>.of(ids);
+    return _mutate((messages, nextId) {
+      final before = messages.length;
+      messages.removeWhere((message) => selected.contains(message.id));
+      return before - messages.length;
+    });
   }
 
-  /// Remove message from queue
-  Future<void> dequeue(int id) async {
-    if (_queue.remove(id) != null) {
-      await _saveQueue();
-    }
+  Future<void> retryDestination(String destination) =>
+      _mutate((messages, nextId) {
+        for (var i = 0; i < messages.length; i++) {
+          if (messages[i].destination == destination) {
+            messages[i] = messages[i].copyWith(retryAt: 0);
+          }
+        }
+      });
+
+  Future<void> clearAll() => _mutate((messages, nextId) {
+    messages.clear();
+  });
+  int get size => _messages.length;
+  bool get isEmpty => _messages.isEmpty;
+  Future<void> close() async {
+    await _writes;
+    _closed = true;
+    await _changes.close();
+    await _store.close();
   }
-
-  /// Increment retry count for a message
-  Future<void> incrementRetry(int id) async {
-    final message = _queue[id];
-    if (message != null) {
-      _queue[id] = message.copyWith(retryCount: message.retryCount + 1);
-      await _saveQueue();
-    }
-  }
-
-  /// Get all messages in queue
-  List<QueuedMessage> getAllMessages() {
-    return _queue.values.toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-  }
-
-  /// Clear all messages
-  Future<void> clearAll() async {
-    _queue.clear();
-    await _saveQueue();
-  }
-
-  /// Get queue size
-  int get size => _queue.length;
-
-  /// Check if queue is empty
-  bool get isEmpty => _queue.isEmpty;
 }

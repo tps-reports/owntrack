@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:owntrack/core/constants/app_constants.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:owntrack/data/datasources/local/preferences/settings_local_datasource.dart';
@@ -7,17 +9,17 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Position _position() => Position(
-      latitude: 40.2141,
-      longitude: -111.6711,
-      timestamp: DateTime.fromMillisecondsSinceEpoch(1704110400000),
-      accuracy: 35,
-      altitude: 1400,
-      altitudeAccuracy: 10,
-      heading: 0,
-      headingAccuracy: 0,
-      speed: 0,
-      speedAccuracy: 0,
-    );
+  latitude: 40.2141,
+  longitude: -111.6711,
+  timestamp: DateTime.fromMillisecondsSinceEpoch(1704110400000),
+  accuracy: 35,
+  altitude: 1400,
+  altitudeAccuracy: 10,
+  heading: 0,
+  headingAccuracy: 0,
+  speed: 0,
+  speedAccuracy: 0,
+);
 
 /// Scripted stand-in for the geolocator platform, reproducing the macOS
 /// authorization race: requestPermission resolves granted, but the very next
@@ -36,6 +38,17 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform
   /// exception to throw (last one repeats).
   final List<Object> positionResults;
 
+  final positions = StreamController<Position>.broadcast();
+  LocationSettings? streamSettings;
+  LocationSettings? oneShotSettings;
+  int streamCalls = 0;
+  @override
+  Stream<Position> getPositionStream({LocationSettings? locationSettings}) {
+    streamCalls++;
+    streamSettings = locationSettings;
+    return positions.stream;
+  }
+
   int checkPermissionCalls = 0;
   int requestPermissionCalls = 0;
   int getCurrentPositionCalls = 0;
@@ -46,8 +59,9 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform
   @override
   Future<LocationPermission> checkPermission() async {
     final i = checkPermissionCalls++;
-    return permissionSequence[
-        i < permissionSequence.length ? i : permissionSequence.length - 1];
+    return permissionSequence[i < permissionSequence.length
+        ? i
+        : permissionSequence.length - 1];
   }
 
   @override
@@ -60,9 +74,12 @@ class _FakeGeolocatorPlatform extends GeolocatorPlatform
   Future<Position> getCurrentPosition({
     LocationSettings? locationSettings,
   }) async {
+    oneShotSettings = locationSettings;
     final i = getCurrentPositionCalls++;
-    final scripted = positionResults[
-        i < positionResults.length ? i : positionResults.length - 1];
+    final scripted =
+        positionResults[i < positionResults.length
+            ? i
+            : positionResults.length - 1];
     if (scripted is Position) return scripted;
     // ignore: only_throw_errors
     throw scripted;
@@ -76,9 +93,74 @@ Future<LocationService> _service() async {
 }
 
 void main() {
+  final originalPlatform = GeolocatorPlatform.instance;
+  tearDown(() => GeolocatorPlatform.instance = originalPlatform);
+  group('monitoring lifecycle', () {
+    late _FakeGeolocatorPlatform platform;
+    late SettingsRepository settings;
+    late LocationService service;
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      settings = SettingsRepository(
+        SettingsLocalDataSource(await SharedPreferences.getInstance()),
+      );
+      platform = _FakeGeolocatorPlatform(
+        permissionSequence: [LocationPermission.always],
+        positionResults: [_position()],
+      );
+      GeolocatorPlatform.instance = platform;
+      service = LocationService(settings);
+    });
+    tearDown(() async {
+      await service.stopTracking();
+      service.dispose();
+      await platform.positions.close();
+    });
+    for (final mode in [
+      AppConstants.monitoringModeQuiet,
+      AppConstants.monitoringModeManual,
+    ]) {
+      test('mode $mode never requests automatic location updates', () async {
+        await settings.setMonitoringMode(mode);
+        expect(await service.startTracking(), isTrue);
+        expect(platform.streamCalls, 0);
+        expect(platform.checkPermissionCalls, 0);
+        expect(service.isTracking, isFalse);
+      });
+    }
+    for (final mode in [
+      AppConstants.monitoringModeSignificant,
+      AppConstants.monitoringModeMove,
+    ]) {
+      test('mode $mode does not cancel tracking when stationary', () async {
+        await settings.setMonitoringMode(mode);
+        expect(await service.startTracking(), isTrue);
+        expect(platform.streamSettings!.timeLimit, isNull);
+      });
+    }
+    test('repeated start owns exactly one GPS subscription', () async {
+      await Future.wait([service.startTracking(), service.startTracking()]);
+      expect(platform.streamCalls, 1);
+      await service.stopTracking();
+      expect(platform.positions.hasListener, isFalse);
+    });
+    test('stream errors reach consumers and clear active state', () async {
+      await service.startTracking();
+      final error = service.locationUpdates.first;
+      platform.positions.addError(const LocationServiceDisabledException());
+      await expectLater(
+        error,
+        throwsA(isA<LocationServiceDisabledException>()),
+      );
+      expect(service.isTracking, isFalse);
+    });
+    test('one-shot acquisition has a finite deadline', () async {
+      expect(await service.getCurrentLocation(), isNotNull);
+      expect(platform.oneShotSettings!.timeLimit, const Duration(seconds: 30));
+    });
+  });
   group('LocationService.getCurrentLocation', () {
-    test(
-        'retries when the first read hits the stale-denial race right after '
+    test('retries when the first read hits the stale-denial race right after '
         'permission is granted', () async {
       // Reproduces the observed macOS sequence: checkPermission=denied,
       // requestPermission=always, then getCurrentPosition throws
@@ -97,8 +179,11 @@ void main() {
 
       final update = await (await _service()).getCurrentLocation();
 
-      expect(update, isNotNull,
-          reason: 'first tap after granting permission must succeed');
+      expect(
+        update,
+        isNotNull,
+        reason: 'first tap after granting permission must succeed',
+      );
       expect(update!.latitude, closeTo(40.2141, 1e-9));
       expect(fake.getCurrentPositionCalls, 2);
     });
@@ -116,8 +201,11 @@ void main() {
       final update = await (await _service()).getCurrentLocation();
 
       expect(update, isNull);
-      expect(fake.getCurrentPositionCalls, lessThanOrEqualTo(3),
-          reason: 'must not retry unboundedly');
+      expect(
+        fake.getCurrentPositionCalls,
+        lessThanOrEqualTo(3),
+        reason: 'must not retry unboundedly',
+      );
     });
 
     test('does not retry when permission was denied outright', () async {
@@ -133,8 +221,11 @@ void main() {
       final update = await (await _service()).getCurrentLocation();
 
       expect(update, isNull);
-      expect(denying.getCurrentPositionCalls, 0,
-          reason: 'no position read should be attempted without permission');
+      expect(
+        denying.getCurrentPositionCalls,
+        0,
+        reason: 'no position read should be attempted without permission',
+      );
     });
 
     test('succeeds without retrying when there is no race', () async {

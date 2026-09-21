@@ -9,251 +9,135 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class MockDio extends Mock implements Dio {}
 
-class FakeRequestOptions extends Fake implements RequestOptions {}
-
 void main() {
   setUpAll(() {
-    registerFallbackValue(FakeRequestOptions());
     registerFallbackValue(Options());
+    registerFallbackValue(CancelToken());
   });
+  late MockDio dio;
+  late SettingsRepository settings;
+  late EndpointStateRepository state;
+  late HttpService service;
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    settings = SettingsRepository(
+      SettingsLocalDataSource(await SharedPreferences.getInstance()),
+    );
+    await settings.setHttpUrl('https://example.com/pub');
+    await settings.setDeviceId('phone');
+    state = EndpointStateRepository();
+    dio = MockDio();
+    service = HttpService(settings, state, dio: dio);
+  });
+  tearDown(() {
+    service.dispose();
+    state.dispose();
+  });
+  void respond(int status, Object? data) {
+    when(
+      () => dio.post<Object?>(
+        any(),
+        data: any(named: 'data'),
+        options: any(named: 'options'),
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer(
+      (_) async => Response<Object?>(
+        requestOptions: RequestOptions(path: '/pub'),
+        statusCode: status,
+        data: data,
+      ),
+    );
+  }
 
-  group('HttpService', () {
-    late HttpService service;
-    late SettingsRepository settingsRepository;
-    late EndpointStateRepository stateRepository;
-    late MockDio mockDio;
-
-    setUp(() async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
-      final dataSource = SettingsLocalDataSource(prefs);
-      settingsRepository = SettingsRepository(dataSource);
-      stateRepository = EndpointStateRepository();
-      mockDio = MockDio();
-
-      service = HttpService(
-        settingsRepository,
-        stateRepository,
-        dio: mockDio,
-      );
+  test(
+    'configuration makes POST-only endpoint ready without a GET or false connected status',
+    () async {
+      expect(await service.connect(), isTrue);
+      expect(service.isConnected, isTrue);
+      expect(state.state, EndpointState.idle);
+      verifyNever(() => dio.get(any(), options: any(named: 'options')));
+    },
+  );
+  test('missing endpoint has actionable error', () async {
+    await settings.setHttpUrl('');
+    expect(await service.connect(), isFalse);
+    expect(state.state, EndpointState.error);
+  });
+  test('insecure endpoint is rejected', () async {
+    await settings.setHttpUrl('http://example.com/pub');
+    expect(await service.connect(), isFalse);
+    expect(state.errorMessage, contains('HTTPS'));
+  });
+  for (final status in [200, 201, 202, 204, 299]) {
+    test('HTTP $status acknowledges outgoing delivery', () async {
+      respond(status, '');
+      await service.connect();
+      expect(await service.publish('{"_type":"location"}'), isTrue);
+      expect(state.state, EndpointState.connected);
     });
-
-    tearDown(() {
-      service.dispose();
-      stateRepository.dispose();
-    });
-
-    group('connect', () {
-      test('should fail when HTTP URL not configured', () async {
-        final result = await service.connect();
-
-        expect(result, isFalse);
-        expect(stateRepository.state, equals(EndpointState.idle));
-        expect(service.isConnected, isFalse);
-      });
-
-      test('should connect successfully when endpoint is reachable', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-              data: {},
-            ));
-
-        final result = await service.connect();
-
-        expect(result, isTrue);
-        expect(stateRepository.state, equals(EndpointState.connected));
-        expect(service.isConnected, isTrue);
-      });
-
-      test('should fail when endpoint is not reachable', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenThrow(DioException(
-              requestOptions: FakeRequestOptions(),
-              error: 'Connection refused',
-            ));
-
-        final result = await service.connect();
-
-        expect(result, isFalse);
-        expect(stateRepository.state, equals(EndpointState.idle));
-        expect(service.isConnected, isFalse);
-      });
-    });
-
-    group('disconnect', () {
-      test('should disconnect and update state', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-            ));
-
-        await service.connect();
-        expect(service.isConnected, isTrue);
-
-        await service.disconnect();
-
-        expect(service.isConnected, isFalse);
-        expect(stateRepository.state, equals(EndpointState.disconnected));
-      });
-    });
-
-    group('publish', () {
-      test('should fail when not connected', () async {
-        final result = await service.publish('{"test": "data"}');
-        expect(result, isFalse);
-      });
-
-      test('should publish successfully via HTTP POST', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-            ));
-
-        when(() => mockDio.post(
-              any(),
-              data: any(named: 'data'),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-            ));
-
-        await service.connect();
-        final result = await service.publish('{"test": "data"}');
-
-        expect(result, isTrue);
-        verify(() => mockDio.post(
-              'https://example.com/owntracks',
-              data: '{"test": "data"}',
-              options: any(named: 'options'),
-            )).called(1);
-      });
-
-      test('should fail when HTTP POST returns error status', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-            ));
-
-        when(() => mockDio.post(
-              any(),
-              data: any(named: 'data'),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 500,
-            ));
-
-        await service.connect();
-        final result = await service.publish('{"test": "data"}');
-
-        expect(result, isFalse);
-      });
-
-      test('should fail when HTTP POST throws exception', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-            ));
-
-        when(() => mockDio.post(
-              any(),
-              data: any(named: 'data'),
-              options: any(named: 'options'),
-            )).thenThrow(DioException(
-              requestOptions: FakeRequestOptions(),
-              error: 'Network error',
-            ));
-
-        await service.connect();
-        final result = await service.publish('{"test": "data"}');
-
-        expect(result, isFalse);
-      });
-    });
-
-    group('messages stream', () {
-      test('should receive messages via polling', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-              data: {'_type': 'location', 'lat': 37.7749, 'lon': -122.4194},
-            ));
-
-        final messages = <Map<String, dynamic>>[];
-        service.messages.listen(messages.add);
-
-        await service.connect();
-
-        // Wait for initial poll
-        await Future.delayed(const Duration(milliseconds: 100));
-
-        expect(messages.length, greaterThan(0));
-        expect(messages.first['_type'], equals('location'));
-      });
-
-      test('should handle array of messages from polling', () async {
-        await settingsRepository.setHttpUrl('https://example.com/owntracks');
-
-        when(() => mockDio.get(
-              any(),
-              options: any(named: 'options'),
-            )).thenAnswer((_) async => Response(
-              requestOptions: FakeRequestOptions(),
-              statusCode: 200,
-              data: [
-                {'_type': 'location', 'lat': 37.7749},
-                {'_type': 'location', 'lat': 38.0000},
-              ],
-            ));
-
-        final messages = <Map<String, dynamic>>[];
-        service.messages.listen(messages.add);
-
-        await service.connect();
-
-        // Wait for initial poll
-        await Future.delayed(const Duration(milliseconds: 100));
-
-        expect(messages.length, equals(2));
-        expect(messages[0]['lat'], equals(37.7749));
-        expect(messages[1]['lat'], equals(38.0000));
-      });
-    });
+  }
+  test('response location messages are emitted from POST', () async {
+    respond(
+      200,
+      '[{"_type":"location","topic":"owntracks/alice/phone","lat":12,"lon":34,"tst":10}]',
+    );
+    final incoming = service.messages.first;
+    await service.connect();
+    expect(await service.publish('{}'), isTrue);
+    expect((await incoming)['topic'], 'owntracks/alice/phone');
+  });
+  test(
+    'malformed response surfaces error without retrying accepted outgoing delivery',
+    () async {
+      respond(200, '["invalid"]');
+      await service.connect();
+      expect(await service.publish('{}'), isTrue);
+      expect(state.state, EndpointState.error);
+      expect(state.errorMessage, contains('response'));
+    },
+  );
+  test(
+    'credentials go in auth header, never URL, and device identity is supplied',
+    () async {
+      await settings.setHttpUrl('https://alice:secret@example.com/pub');
+      respond(204, '');
+      await service.connect();
+      expect(await service.publish('{}'), isTrue);
+      final options =
+          verify(
+                () => dio.post<Object?>(
+                  'https://example.com/pub',
+                  data: '{}',
+                  options: captureAny(named: 'options'),
+                  cancelToken: any(named: 'cancelToken'),
+                ),
+              ).captured.single
+              as Options;
+      expect(options.headers!['Authorization'], 'Basic YWxpY2U6c2VjcmV0');
+      expect(options.headers!['X-Limit-D'], 'phone');
+      expect(options.headers!['X-Limit-U'], 'alice');
+      expect(options.followRedirects, isFalse);
+    },
+  );
+  test('failed POST remains unacknowledged with actionable status', () async {
+    respond(401, '');
+    await service.connect();
+    expect(await service.publish('{}'), isFalse);
+    expect(state.state, EndpointState.error);
+  });
+  test('disconnect prevents requests', () async {
+    await service.connect();
+    await service.disconnect();
+    expect(await service.publish('{}'), isFalse);
+    expect(state.state, EndpointState.disconnected);
+    verifyNever(
+      () => dio.post<Object?>(
+        any(),
+        data: any(named: 'data'),
+        options: any(named: 'options'),
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    );
   });
 }

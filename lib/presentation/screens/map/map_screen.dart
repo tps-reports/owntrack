@@ -1,3 +1,4 @@
+import 'package:owntrack/presentation/screens/settings/settings_screen.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,11 +10,6 @@ import 'package:owntrack/domain/providers/app_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:owntrack/presentation/screens/contacts/contacts_screen.dart';
 import 'package:owntrack/presentation/widgets/add_waypoint_panel.dart';
-import 'package:owntrack/presentation/screens/regions/regions_screen.dart';
-import 'package:owntrack/presentation/screens/settings/connection_settings_screen.dart';
-import 'package:owntrack/presentation/screens/settings/identification_settings_screen.dart';
-import 'package:owntrack/presentation/screens/settings/tracking_settings_screen.dart';
-import 'package:owntrack/presentation/screens/waypoints/waypoints_screen.dart';
 
 /// Main map screen showing current location, friends, and regions
 class MapScreen extends ConsumerStatefulWidget {
@@ -280,106 +276,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return const ContactsScreen();
   }
 
-  Widget _buildSettingsView() {
-    return ListView(
-      children: [
-        ListTile(
-          leading: const Icon(Icons.wifi),
-          title: const Text('Connection'),
-          subtitle: const Text('MQTT and HTTP settings'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const ConnectionSettingsScreen(),
-              ),
-            );
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.location_on),
-          title: const Text('Tracking'),
-          subtitle: const Text('Location tracking preferences'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const TrackingSettingsScreen(),
-              ),
-            );
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.person),
-          title: const Text('Identification'),
-          subtitle: const Text('Device and tracker ID'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const IdentificationSettingsScreen(),
-              ),
-            );
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.place),
-          title: const Text('Waypoints'),
-          subtitle: const Text('Manage saved waypoints'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const WaypointsScreen(),
-              ),
-            );
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.location_searching),
-          title: const Text('Regions'),
-          subtitle: const Text('Manage geofence regions'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const RegionsScreen(),
-              ),
-            );
-          },
-        ),
-        const Divider(),
-        ListTile(
-          leading: const Icon(Icons.info),
-          title: const Text('About'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            _showAboutDialog();
-          },
-        ),
-      ],
-    );
-  }
-
-  void _showAboutDialog() {
-    showAboutDialog(
-      context: context,
-      applicationName: 'OwnTracks',
-      applicationVersion: '1.0.0',
-      applicationLegalese: '© 2025 OwnTracks\nMIT License',
-      children: [
-        const SizedBox(height: 16),
-        const Text(
-          'A unified Flutter implementation of OwnTracks for Android and iOS.',
-        ),
-      ],
-    );
-  }
+  Widget _buildSettingsView() => const SettingsContent();
 
   List<CircleMarker> _buildRegionCircles() {
     final regionsAsync = ref.watch(regionsStreamProvider);
@@ -570,7 +467,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(content: Text('Location published')),
+          const SnackBar(content: Text('Location queued for delivery')),
         );
     } catch (e) {
       AppLogger.e('Manual location publish failed: $e');
