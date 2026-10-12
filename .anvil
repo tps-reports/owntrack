@@ -5,6 +5,8 @@ node:
   description: OwnTracks-compatible location sharing with MQTT and maps
 
 build:
+  dart_defines:
+    MAPS_API_KEY: "${MAPS_API_KEY}"
   platforms:
     web_wasm:
       builder: flutter_web

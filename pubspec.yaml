@@ -20,7 +20,9 @@ dependencies:
 
   # Database
   drift: ^2.20.3
-  sqlite3_flutter_libs: ^0.6.0+eol
+  # Drift's sqlite3 2.x dependency needs the native libraries from 0.5.x.
+  # The 0.6.x package is empty and requires migrating to sqlite3 3.x first.
+  sqlite3_flutter_libs: ^0.5.42
   path_provider: ^2.1.5
   path: ^1.9.0
 

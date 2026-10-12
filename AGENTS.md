@@ -18,6 +18,8 @@ OwnTracks Flutter is a unified Flutter implementation of OwnTracks for Android, 
 
 ## Development Commands
 
+**Required build policy: all Flutter application builds and launches go through Anvil.** Use its canonical `build_flutter.dart` entrypoint for artifacts and `dev_runner.dart` for native development runs. Do not invoke `flutter build` or `flutter run` directly, or bypass Anvil with a local `dart_defines.json`. Compiler configuration belongs in `.anvil`; secret values come from the environment. The dependency, test, analysis, and formatting commands below remain valid.
+
 ### Setup
 ```bash
 # Install dependencies
@@ -57,47 +59,14 @@ dart format lib/ test/
 dart fix --apply
 ```
 
-### Building and Running
-```bash
-# Run on connected device/emulator
-flutter run
-
-# Run on web browser
-flutter run -d chrome
-
-# Run with verbose logging
-flutter run -v
-
-# Build Android APK (debug)
-flutter build apk --debug
-
-# Build Android APK (release)
-flutter build apk --release
-
-# Build iOS (requires macOS and Xcode)
-flutter build ios
-
-# Build for web
-flutter build web --release
-
-# Build for web with custom base href
-flutter build web --release --base-href /owntrack/
-
-# Serve web build locally for testing
-# After building, serve from build/web directory
-python3 -m http.server 8000 --directory build/web
-
-# Clean build artifacts
-flutter clean
-```
-
-### Building with Anvil
+### Building and Running with Anvil
 
 This project is registered with **Anvil**, the FiveX build and deployment system, via the `.anvil` file at the repo root. Anvil discovers projects by scanning WebDAV storage for `.anvil` files — the file is the registration mechanism; it is version-controlled and must stay at the repo root.
 
 **What `.anvil` declares for owntrack:**
 - **Platforms**: `web_wasm` (WASM build, `--base-href /owntrack/`, no icon tree-shaking, artifact at `build/web/`), `macos` (artifact at `build/macos/Build/Products/Release/owntrack.app`), and `android_apk` (artifact at `build/app/outputs/flutter-apk/app-release.apk`).
-- **Environments**: `local`, `dev`, and `prod`, each with a `config_url` carrying the MQTT host/port, relying-party ID, and the MapTiler key as a `${MAPS_API_KEY}` placeholder. The placeholder is expanded from the shell environment at launch time so the tracked file never contains the secret — `export MAPS_API_KEY=<key>` before running.
+- **Compiler parameters**: `build.dart_defines.MAPS_API_KEY: "${MAPS_API_KEY}"`. The canonical builder resolves this declaration for native and web builds from the explicitly selected root's `.env`, overlaid by the process environment; the process environment wins. Only the placeholder is tracked.
+- **Environments**: `local`, `dev`, and `prod`, each with a `config_url` carrying the MQTT host/port, relying-party ID, and a `maps_key=${MAPS_API_KEY}` placeholder. Native `dev_runner` expands the placeholder from the shell environment and passes the URL as the `FIVEX_CONFIG` compiler define. OwnTrack extracts the map key from this URL; its saved MQTT settings are not overwritten by the URL.
 - **Connections**: `mosquitto` (MQTT) and `nginx` (gateway).
 - **Versioning**: derived from git tags (`version.source: git_tag`).
 
@@ -105,40 +74,47 @@ This project is registered with **Anvil**, the FiveX build and deployment system
 
 ```bash
 # From /Users/michael/code/fivex
+# Export the valid MAPS_API_KEY in the shell before invoking Anvil.
+# Do not print its value or substitute a stale dart_defines.json.
 
 # List available devices/simulators
 dart run mod_dart/bin/dev_runner.dart devices
 
 # Run owntrack locally using its .anvil config (env: local | dev | prod)
 # Non-web targets receive --dart-define=FIVEX_CONFIG=<expanded config_url>;
-# the app reads maps_key/mqtt settings from that URL.
-export MAPS_API_KEY=<your-maptiler-key>
+# the app reads maps_key from that URL.
 dart run mod_dart/bin/dev_runner.dart run \
   --app owntrack \
   --root /Users/michael/webdav/coyote_forge/mhunter \
   --env local \
-  --target macos            # or android_apk, or an explicit flutter device id
-
-# Web targets (chrome, web_wasm) get NO dart-define from anvil — web builds are
-# domain-relative by design (the same artifact serves any domain). For web the
-# MapTiler key must still be passed directly (see MapTiler API Key below).
-dart run mod_dart/bin/dev_runner.dart run \
-  --app owntrack --root /Users/michael/webdav/coyote_forge/mhunter \
-  --env local --target chrome
+  --target macos            # or android, or an explicit Flutter device id
 
 # Canonical one-off platform build (same entrypoint the build worker uses)
+# This reads build.dart_defines from the project's .anvil for every platform.
 dart run mod_dart/bin/build_flutter.dart \
   --platform web-wasm \
   --project /Users/michael/webdav/coyote_forge/mhunter/owntrack \
+  --root /Users/michael/code/fivex \
   --base-href /owntrack/
 dart run mod_dart/bin/build_flutter.dart \
   --platform apk \
-  --project /Users/michael/webdav/coyote_forge/mhunter/owntrack
+  --project /Users/michael/webdav/coyote_forge/mhunter/owntrack \
+  --root /Users/michael/code/fivex
+
+# iOS archive/export requires configured signing credentials.
+dart run mod_dart/bin/build_flutter.dart \
+  --platform ipa \
+  --project /Users/michael/webdav/coyote_forge/mhunter/owntrack \
+  --root /Users/michael/code/fivex
 ```
+
+The two `--root` arguments serve different purposes: `dev_runner` locates `<root>/<app>/.anvil`, whereas `build_flutter` uses the project path for `.anvil` and `--root` for environment expansion. Select `--env` explicitly for development runs. Use the phone's exact Flutter device ID when more than one Android device is connected; `android_apk` is a build platform key, not a development device selector.
+
+Web `dev_runner` currently forwards no compiler defines. Use the canonical web build above to include the declared map key, and serve its output at `/owntrack/`. Do not work around this limitation with a direct Flutter invocation. The current Anvil runners can print expanded compiler arguments; redact credential values before displaying or sharing their output.
 
 **Environment progression**: `local` → `dev` → `prod`. The `dev` and `prod` environments use `mode: host_artifact` with `nginx_static` as the web deploy target (served at `/owntrack/` per `host_path`); `local` uses `mode: native` (`flutter_run_chrome`, `local_launch`, `adb_install`). Promotion of artifacts is an explicit, tracked operation handled by anvil — never a manual file copy into the `releases/` tree.
 
-Anvil principles and the full deploy CLI (`dart run mod_dart/bin/anvil.dart`) are documented in `/Users/michael/code/fivex/docs/anvil.md` and `/Users/michael/code/fivex/mod_dart/AGENTS.md`.
+Anvil principles are documented in `/Users/michael/code/fivex/docs/anvil.md`; repository deployment guidance is in `/Users/michael/code/fivex/AGENTS.md`. The full deploy CLI is `dart run mod_dart/bin/anvil.dart`.
 
 ### MapTiler API Key
 
@@ -147,17 +123,9 @@ The map screen needs a MapTiler key at **compile time** (`String.fromEnvironment
 1. the `MAPS_API_KEY` dart-define;
 2. the `maps_key` query parameter of the `FIVEX_CONFIG` dart-define (the URL anvil's dev_runner passes from `.anvil`'s `config_url` on non-web targets).
 
-For plain `flutter run` / `flutter build` (including all web builds), pass the key directly:
+Use the Anvil commands above so the tracked compiler declaration or native environment configuration supplies the key. A shell variable alone does not configure Flutter unless Anvil forwards it. Do not add a competing `--dart-define-from-file=dart_defines.json` or hardcode the key in `.anvil`; a stale direct `MAPS_API_KEY` define takes precedence over a valid `FIVEX_CONFIG` key.
 
-```bash
-flutter run --dart-define=MAPS_API_KEY=$MAPS_API_KEY
-flutter build web --release --dart-define=MAPS_API_KEY=$MAPS_API_KEY
-
-# Or via the git-ignored defines file (see dart_defines.example.json)
-flutter run --dart-define-from-file=dart_defines.json
-```
-
-Without a key the map throws a `StateError` rather than degrading to a blank tile grid. The key ships in the client bundle by necessity — restrict it by allowed origin in the MapTiler dashboard.
+Without a key the map displays a configuration error while settings remain accessible. The key ships in the client bundle by necessity. Use a website key restricted by allowed HTTP origins for web, and a separate native key restricted by the app's User-Agent. Origin and User-Agent restrictions on the same key must both match; a website-only key can be rejected by native requests.
 
 ## Architecture Overview
 
@@ -512,7 +480,7 @@ test/
   - `web/manifest.json` - PWA manifest (installable web app)
   - Icons in `web/icons/` for PWA installation
 - Deployment:
-  - Build with `flutter build web --release`
+  - Build through Anvil's canonical `build_flutter.dart --platform web-wasm` command above, including the explicit project and root arguments
   - Deploy to any static web host (Nginx, Apache, Firebase Hosting, etc.)
   - Set appropriate CORS headers for MQTT/HTTP endpoints if needed
 - Known Limitations:
