@@ -1,31 +1,15 @@
 node:
   name: owntrack
-  type: flutter_app
+  type: flutter
   category: demo
   description: OwnTracks-compatible location sharing with MQTT and maps
 
-static_app:
-  path: /owntrack/
+static_app: {}
 
 build:
   dart_defines:
     MAPS_API_KEY: "${MAPS_API_KEY:-}"
-  platforms:
-    web_wasm:
-      builder: flutter_web
-      params:
-        wasm: true
-        no_tree_shake_icons: true
-        base_href: "/owntrack/"
-      artifact: "build/web/"
-      host_path: "/owntrack/"
-    macos:
-      artifact: "build/macos/Build/Products/Release/owntrack.app"
-    android_apk:
-      artifact: "build/app/outputs/flutter-apk/app-release.apk"
-
-version:
-  source: git_tag
+  platforms: [android_apk]
 
 connections:
   - target: mosquitto
@@ -34,19 +18,7 @@ connections:
     type: gateway
 
 environments:
-  local:
-    mode: native
-    targets:
-      web_wasm: flutter_run_chrome
-      macos: local_launch
-      android_apk: adb_install
-  dev:
-    mode: host_artifact
-    targets:
-      web_wasm: nginx_static
-      android_apk: adb_install
   prod:
     mode: host_artifact
     targets:
-      web_wasm: nginx_static
       android_apk: adb_install
